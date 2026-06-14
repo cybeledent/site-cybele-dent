@@ -478,6 +478,11 @@ body.modal-open { overflow: hidden; }
   section { padding: 60px 0; }
   .container { padding: 0 18px; }
 
+  /* L'effet de flou de l'en-tête « emprisonnait » le menu déroulant (position:fixed),
+     son fond blanc ne couvrait alors qu'une partie des liens. On désactive le flou
+     sur mobile et on rend l'en-tête opaque pour un menu lisible sur toute la hauteur. */
+  .site-header { backdrop-filter: none; -webkit-backdrop-filter: none; background: #fff; }
+
   /* Bandeau d'infos : centré et plus compact */
   .topbar { font-size: .82rem; }
   .topbar .container { justify-content: center; text-align: center; gap: 4px 0; }

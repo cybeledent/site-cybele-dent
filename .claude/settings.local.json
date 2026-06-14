@@ -6,7 +6,15 @@
       "PowerShell($cmds = 'node','npm','npx'; foreach\\($c in $cmds\\){ $p = \\(Get-Command $c -ErrorAction SilentlyContinue\\).Source; if\\($p\\){ \"$c -> $p\" } else { \"$c -> INTROUVABLE\" } })",
       "PowerShell($env:Path = [System.Environment]::GetEnvironmentVariable\\(\"Path\",\"Machine\"\\) + \";\" + [System.Environment]::GetEnvironmentVariable\\(\"Path\",\"User\"\\); node --version; npm --version)",
       "WebFetch(domain:cabinetdentairelumiere.fr)",
-      "mcp__Claude_Preview__preview_start"
+      "mcp__Claude_Preview__preview_start",
+      "Bash(git add *)",
+      "Bash(git commit -m 'Améliore l'\\\\''adaptation mobile \\(responsive smartphone\\) *)",
+      "Bash(git push *)",
+      "Bash(gh auth *)",
+      "PowerShell($gh = Get-Command gh -ErrorAction SilentlyContinue; if \\($gh\\) { \"gh trouvé: $\\($gh.Source\\)\"; gh api repos/cybeledent/site-cybele-dent/pages 2>&1 } else { \"gh introuvable\" })",
+      "Bash(git commit -m 'Ajoute un numero de version au CSS \\(cache-busting\\) *)",
+      "Bash(git commit -m 'Ajoute la balise de verification Google Search Console *)",
+      "Bash(git commit -m 'Corrige le fond blanc du menu mobile \\(backdrop-filter desactive\\) *)"
     ]
   }
 }
