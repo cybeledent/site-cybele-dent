@@ -1,0 +1,86 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1600 900" preserveAspectRatio="xMidYMid slice" role="img" aria-label="Cathédrale Saint-Maurice de Vienne (illustration)">
+  <defs>
+    <linearGradient id="sky" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0"   stop-color="#cdeef0"/>
+      <stop offset="0.55" stop-color="#a9dde2"/>
+      <stop offset="1"   stop-color="#7cc4cc"/>
+    </linearGradient>
+    <radialGradient id="sun" cx="78%" cy="22%" r="40%">
+      <stop offset="0" stop-color="#fff7e6" stop-opacity="0.95"/>
+      <stop offset="1" stop-color="#fff7e6" stop-opacity="0"/>
+    </radialGradient>
+    <linearGradient id="stone" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#e7dcc6"/>
+      <stop offset="1" stop-color="#c9b894"/>
+    </linearGradient>
+    <linearGradient id="stoneDark" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#d8caac"/>
+      <stop offset="1" stop-color="#b6a37e"/>
+    </linearGradient>
+  </defs>
+
+  <!-- ciel -->
+  <rect width="1600" height="900" fill="url(#sky)"/>
+  <rect width="1600" height="900" fill="url(#sun)"/>
+
+  <!-- collines lointaines de Vienne -->
+  <path d="M0 700 Q300 620 620 690 T1180 670 T1600 700 V900 H0 Z" fill="#9fd3cf" opacity="0.55"/>
+  <path d="M0 760 Q360 700 760 760 T1600 750 V900 H0 Z" fill="#8ac6c4" opacity="0.5"/>
+
+  <!-- ===== Cathédrale gothique stylisée ===== -->
+  <g>
+    <!-- corps principal -->
+    <rect x="560" y="430" width="480" height="380" fill="url(#stone)"/>
+
+    <!-- tour gauche -->
+    <rect x="470" y="300" width="120" height="510" fill="url(#stoneDark)"/>
+    <polygon points="470,300 530,210 590,300" fill="#b6a37e"/>
+    <!-- tour droite -->
+    <rect x="1010" y="300" width="120" height="510" fill="url(#stoneDark)"/>
+    <polygon points="1010,300 1070,210 1130,300" fill="#b6a37e"/>
+
+    <!-- pignon central -->
+    <polygon points="560,430 800,300 1040,430" fill="url(#stoneDark)"/>
+
+    <!-- rosace -->
+    <circle cx="800" cy="470" r="58" fill="#bfae89"/>
+    <circle cx="800" cy="470" r="46" fill="#9fd3cf" opacity="0.7"/>
+    <g stroke="#7a6c4f" stroke-width="4">
+      <line x1="800" y1="424" x2="800" y2="516"/>
+      <line x1="754" y1="470" x2="846" y2="470"/>
+      <line x1="767" y1="437" x2="833" y2="503"/>
+      <line x1="833" y1="437" x2="767" y2="503"/>
+    </g>
+    <circle cx="800" cy="470" r="14" fill="#bfae89"/>
+
+    <!-- fenêtres ogivales des tours -->
+    <g fill="#9fd3cf" opacity="0.75">
+      <path d="M505 360 q25 -30 50 0 v70 h-50 z"/>
+      <path d="M1045 360 q25 -30 50 0 v70 h-50 z"/>
+      <path d="M505 500 q25 -30 50 0 v70 h-50 z"/>
+      <path d="M1045 500 q25 -30 50 0 v70 h-50 z"/>
+    </g>
+
+    <!-- trois portails -->
+    <g fill="#7a6c4f">
+      <path d="M620 810 v-150 q60 -70 120 0 v150 z"/>
+      <path d="M740 810 v-170 q60 -80 120 0 v170 z"/>
+      <path d="M860 810 v-150 q60 -70 120 0 v150 z"/>
+    </g>
+    <g fill="#9c8c69">
+      <path d="M632 810 v-140 q48 -56 96 0 v140 z"/>
+      <path d="M752 810 v-158 q48 -64 96 0 v158 z"/>
+      <path d="M872 810 v-140 q48 -56 96 0 v140 z"/>
+    </g>
+
+    <!-- fenêtres hautes -->
+    <g fill="#9fd3cf" opacity="0.7">
+      <path d="M600 600 q22 -28 44 0 v70 h-44 z"/>
+      <path d="M956 600 q22 -28 44 0 v70 h-44 z"/>
+    </g>
+  </g>
+
+  <!-- esplanade -->
+  <rect x="0" y="808" width="1600" height="92" fill="#cdbf9f"/>
+  <rect x="0" y="808" width="1600" height="10" fill="#b8a982"/>
+</svg>

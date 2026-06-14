@@ -1,0 +1,20 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 120 120" role="img" aria-label="Cybèle Dent">
+  <!-- icône : trois dents-personnages, d'après le logo du cabinet -->
+  <g fill="none" stroke-width="4" stroke-linecap="round" stroke-linejoin="round">
+    <!-- dent gauche (rouge) -->
+    <g stroke="#d6453f">
+      <path d="M18,58 C16,49 20,42 22,52 C23,40 41,40 42,52 C44,42 48,49 46,58 C44,66 42,76 38,76 C35,76 35,67 33,63 C31,60 31,60 29,63 C27,67 27,76 24,76 C20,76 20,66 18,58 Z"/>
+    </g>
+    <circle cx="22" cy="40" r="5.5" fill="#d6453f" stroke="none"/>
+    <!-- dent centrale (bleu marine) -->
+    <g stroke="#2d2d63">
+      <path d="M40,56 C38,46 42,38 45,49 C46,36 74,36 75,49 C78,38 82,46 80,56 C78,65 75,77 71,77 C67,77 67,66 64,62 C61,58 59,58 56,62 C53,66 53,77 49,77 C45,77 42,65 40,56 Z"/>
+    </g>
+    <circle cx="60" cy="34" r="6.5" fill="#2d2d63" stroke="none"/>
+    <!-- dent droite (corail) -->
+    <g stroke="#e8746b">
+      <path d="M74,58 C72,49 76,42 78,52 C79,40 97,40 98,52 C100,42 104,49 102,58 C100,66 98,76 94,76 C91,76 91,67 89,63 C87,60 87,60 85,63 C83,67 83,76 80,76 C76,76 76,66 74,58 Z"/>
+    </g>
+    <circle cx="98" cy="40" r="5.5" fill="#e8746b" stroke="none"/>
+  </g>
+</svg>

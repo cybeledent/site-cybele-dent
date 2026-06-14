@@ -1,0 +1,12 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(npx skills *)",
+      "PowerShell(npx -y skills add https://github.com/Leonxlnx/taste-skill)",
+      "PowerShell($cmds = 'node','npm','npx'; foreach\\($c in $cmds\\){ $p = \\(Get-Command $c -ErrorAction SilentlyContinue\\).Source; if\\($p\\){ \"$c -> $p\" } else { \"$c -> INTROUVABLE\" } })",
+      "PowerShell($env:Path = [System.Environment]::GetEnvironmentVariable\\(\"Path\",\"Machine\"\\) + \";\" + [System.Environment]::GetEnvironmentVariable\\(\"Path\",\"User\"\\); node --version; npm --version)",
+      "WebFetch(domain:cabinetdentairelumiere.fr)",
+      "mcp__Claude_Preview__preview_start"
+    ]
+  }
+}
