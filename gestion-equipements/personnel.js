@@ -26,13 +26,13 @@
   /* =========================================================
      ÉTAT
      ========================================================= */
-  let state = load();
+  let state = null;
   let view = { tab: "dashboard", weekStart: mondayOf(new Date()), monthRef: ymOf(new Date()) };
   let clockTimer = null;
 
-  function load() {
+  function loadLocal() {
     try { const raw = localStorage.getItem(STORE_KEY); if (raw) return migrate(JSON.parse(raw)); } catch (e) {}
-    return seed();
+    return null;
   }
   function migrate(s) {
     s.membres = s.membres || []; s.planning = s.planning || []; s.pointages = s.pointages || [];
@@ -41,8 +41,13 @@
   }
   function defaultReglages() { return { heuresSemaineDefaut: 35, congesAnnuelDefaut: 25, pauseDejeunerMin: 60 }; }
   function save() {
+    // Sauvegarde locale
     try { localStorage.setItem(STORE_KEY, JSON.stringify(state)); }
     catch (e) { toast("⚠ Mémoire pleine."); }
+    // Synchronisation Firestore
+    if (window.CybeleDB) {
+      window.CybeleDB.save("personnel", state).catch(() => {});
+    }
   }
   function uid() { return Date.now().toString(36) + Math.random().toString(36).slice(2, 7); }
 
@@ -672,6 +677,28 @@
     });
   }
 
-  // premier rendu (au cas où le module serait actif au chargement)
-  if (document.body.dataset.module === "personnel") render();
+  // Chargement initial depuis Firestore puis rendu
+  async function initPersonnel() {
+    if (window.CybeleDB) {
+      try {
+        const cloud = await Promise.race([
+          window.CybeleDB.load("personnel"),
+          new Promise((_, rej) => setTimeout(() => rej(new Error("timeout")), 6000))
+        ]);
+        if (cloud) {
+          state = migrate(cloud);
+          try { localStorage.setItem(STORE_KEY, JSON.stringify(state)); } catch (e) {}
+        } else {
+          state = loadLocal() || seed();
+          if (!loadLocal()) save();
+        }
+      } catch (e) {
+        state = loadLocal() || seed();
+      }
+    } else {
+      state = loadLocal() || seed();
+    }
+    if (document.body.dataset.module === "personnel") render();
+  }
+  initPersonnel();
 })();

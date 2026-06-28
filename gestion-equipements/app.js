@@ -22,23 +22,54 @@
   /* =========================================================
      ÉTAT
      ========================================================= */
-  let state = load();
+  let state = null;
   let view = { name: "list", id: null, tab: "carnet", search: "", filter: "all", type: null };
 
-  function load() {
+  function loadLocal() {
     try {
       const raw = localStorage.getItem(STORE_KEY);
       if (raw) return JSON.parse(raw);
     } catch (e) { /* ignore */ }
-    return seed();
+    return null;
   }
 
   function save() {
+    // Sauvegarde locale complète (avec photos/documents)
     try {
       localStorage.setItem(STORE_KEY, JSON.stringify(state));
     } catch (e) {
       toast("⚠ Mémoire pleine : pensez à réduire le nombre de photos ou à faire une sauvegarde.");
     }
+    // Synchronisation Firestore (sans binaires pour respecter la limite 1 Mo)
+    if (window.CybeleDB) {
+      window.CybeleDB.save("equipements", stripBinaries(state)).catch(() => {});
+    }
+  }
+
+  // Retire photos et documents binaires avant envoi à Firestore
+  function stripBinaries(s) {
+    const c = JSON.parse(JSON.stringify(s));
+    (c.equipements || []).forEach(eq => {
+      eq.photos = (eq.photos || []).map(() => "__local__");
+      (eq.documents || []).forEach(d => { if (d.data) d.data = "__local__"; });
+    });
+    return c;
+  }
+
+  // Restaure photos/documents depuis le cache local après chargement cloud
+  function mergePhotosFromLocal(cloud, local) {
+    if (!local) return;
+    (cloud.equipements || []).forEach(eq => {
+      const loc = (local.equipements || []).find(e => e.id === eq.id);
+      if (!loc) return;
+      eq.photos = (eq.photos || []).map((p, i) =>
+        p === "__local__" ? ((loc.photos || [])[i] || "") : p);
+      (eq.documents || []).forEach(d => {
+        if (d.data !== "__local__") return;
+        const ld = (loc.documents || []).find(x => x.id === d.id);
+        if (ld) d.data = ld.data;
+      });
+    });
   }
 
   function uid() { return Date.now().toString(36) + Math.random().toString(36).slice(2, 7); }
@@ -886,5 +917,30 @@
   }
 
   /* ---- Lancement ---- */
-  render();
+  async function init() {
+    app.innerHTML = '<div style="text-align:center;padding:80px 20px;color:var(--muted);font-size:1.1rem">⏳ Chargement…</div>';
+    const local = loadLocal();
+    if (window.CybeleDB) {
+      try {
+        const cloud = await Promise.race([
+          window.CybeleDB.load("equipements"),
+          new Promise((_, rej) => setTimeout(() => rej(new Error("timeout")), 6000))
+        ]);
+        if (cloud) {
+          mergePhotosFromLocal(cloud, local);
+          state = cloud;
+          try { localStorage.setItem(STORE_KEY, JSON.stringify(state)); } catch (e) {}
+        } else {
+          state = local || seed();
+          if (state !== local) save(); // premier enregistrement cloud
+        }
+      } catch (e) {
+        state = local || seed();
+      }
+    } else {
+      state = local || seed();
+    }
+    render();
+  }
+  init();
 })();
