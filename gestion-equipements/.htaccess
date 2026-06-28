@@ -1,4 +1,4 @@
 AuthType Basic
 AuthName "CybeleGestion - Acces reserve au personnel"
-AuthUserFile /home/cybeledent/public_html/gestion-equipements/.htpasswd
+AuthUserFile /home/u700438562/domains/cybele-dent.fr/public_html/gestion-equipements/.htpasswd
 Require valid-user
