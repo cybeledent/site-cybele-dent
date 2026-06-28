@@ -1,0 +1,124 @@
+/* =========================================================
+   CybèleGestion — Module Personnel (styles)
+   Réutilise les variables et composants de app.css
+   ========================================================= */
+
+/* Sous-navigation du module */
+.p-subnav { display: flex; gap: 4px; flex-wrap: wrap; border-bottom: 1px solid var(--line); margin-bottom: 22px; overflow-x: auto; }
+.p-subtab {
+  background: none; border: none; padding: 11px 15px; font-size: .93rem; font-weight: 500;
+  color: var(--muted); border-bottom: 2px solid transparent; white-space: nowrap;
+  display: inline-flex; align-items: center; gap: 7px;
+}
+.p-subtab:hover { color: var(--ink); }
+.p-subtab.active { color: var(--coral); border-bottom-color: var(--coral); font-weight: 600; }
+.p-badge { background: var(--danger); color: #fff; border-radius: 999px; font-size: .72rem; font-weight: 700; padding: 1px 7px; }
+
+/* Avatar */
+.p-avatar {
+  display: inline-flex; align-items: center; justify-content: center; border-radius: 50%;
+  color: #fff; font-weight: 700; font-family: var(--font-head); flex-shrink: 0; text-transform: uppercase;
+}
+
+/* =========================================================
+   TABLEAU DE BORD
+   ========================================================= */
+.p-stats { display: grid; grid-template-columns: repeat(4, 1fr); gap: 12px; margin-bottom: 22px; }
+.p-stat { background: #fff; border: 1px solid var(--line); border-radius: var(--radius); padding: 16px; box-shadow: var(--shadow); text-align: center; }
+.p-stat-n { font-size: 2rem; font-family: var(--font-head); font-weight: 700; line-height: 1; }
+.p-stat-l { color: var(--muted); font-size: .85rem; margin-top: 6px; }
+.p-stat.ok .p-stat-n { color: var(--ok); }
+.p-stat.warn .p-stat-n { color: var(--warn); }
+.p-stat.danger .p-stat-n { color: var(--danger); }
+
+.p-cols { display: grid; grid-template-columns: 1fr 1fr; gap: 20px; }
+.p-col { min-width: 0; }
+
+.btn-mini { border: none; border-radius: 8px; padding: 6px 11px; font-size: .82rem; font-weight: 600; }
+.btn-mini.ok { background: var(--ok-bg); color: var(--ok); }
+.btn-mini.ok:hover { background: #d2f1e1; }
+.btn-mini.no { background: var(--danger-bg); color: var(--danger); }
+.btn-mini.no:hover { background: #f9dada; }
+
+/* =========================================================
+   PLANNING
+   ========================================================= */
+.pl-toolbar { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; margin-bottom: 16px; }
+.btn-nav { width: 38px; height: 38px; border-radius: 10px; border: 1px solid var(--line); background: #fff; font-size: 1.3rem; color: var(--ink); line-height: 1; }
+.btn-nav:hover { border-color: var(--coral); color: var(--coral); }
+.pl-week { font-family: var(--font-head); font-weight: 600; font-size: 1.05rem; min-width: 170px; }
+.pl-legend { display: flex; gap: 6px; flex-wrap: wrap; }
+.pl-leg { font-size: .74rem; padding: 3px 8px; border-radius: 7px; }
+
+.pl-grid { border: 1px solid var(--line); border-radius: var(--radius); overflow: hidden; background: #fff; box-shadow: var(--shadow); }
+.pl-row { display: grid; grid-template-columns: 190px repeat(7, 1fr); border-bottom: 1px solid var(--line); }
+.pl-row:last-child { border-bottom: none; }
+.pl-head { background: var(--bg); position: sticky; top: 0; }
+.pl-name { display: flex; align-items: center; gap: 9px; padding: 10px 12px; border-right: 1px solid var(--line); min-width: 0; }
+.pl-mn { font-weight: 600; font-size: .9rem; }
+.pl-mr { color: var(--muted); font-size: .76rem; }
+.pl-dayhead { display: flex; flex-direction: column; align-items: center; justify-content: center; padding: 8px 4px; font-weight: 600; font-size: .82rem; border-right: 1px solid var(--line); }
+.pl-dayhead span { color: var(--muted); font-weight: 400; font-size: .72rem; }
+.pl-dayhead.today { color: var(--coral); }
+.pl-dayhead.today span { color: var(--coral); }
+
+.pl-cell { padding: 8px 6px; border-right: 1px solid var(--line); font-size: .78rem; min-height: 56px; display: flex; flex-direction: column; gap: 3px; justify-content: center; align-items: center; text-align: center; cursor: pointer; }
+.pl-cell:last-child { border-right: none; }
+.pl-cell:hover { background: var(--coral-light); }
+.pl-empty { color: #cfc9da; font-size: 1.1rem; }
+.pl-type { font-weight: 600; }
+.pl-hours { color: var(--muted); font-size: .72rem; }
+.pl-present { background: #eafaf2; }
+.pl-present .pl-type { color: var(--ok); }
+.pl-repos { background: #f4f3f7; }
+.pl-conge { background: #e8f4ff; }
+.pl-conge .pl-type { color: var(--info); }
+.pl-absence { background: #fff3e0; }
+.pl-absence .pl-type { color: var(--warn); }
+.pl-maladie { background: #fdeaea; }
+.pl-maladie .pl-type { color: var(--danger); }
+.pl-formation { background: #f1e9ff; }
+.pl-formation .pl-type { color: #7b3fe4; }
+
+/* =========================================================
+   BADGEUSE
+   ========================================================= */
+.badge-kiosk { max-width: 760px; margin: 0 auto; }
+.badge-clock { font-family: var(--font-head); font-size: 3.4rem; font-weight: 700; text-align: center; color: var(--navy); letter-spacing: .04em; }
+.badge-date { text-align: center; color: var(--muted); margin-bottom: 16px; text-transform: capitalize; }
+.badge-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 12px; }
+.badge-card {
+  background: #fff; border: 1px solid var(--line); border-radius: var(--radius); padding: 18px 12px;
+  box-shadow: var(--shadow); display: flex; flex-direction: column; align-items: center; gap: 8px;
+  text-align: center; transition: all .15s ease;
+}
+.badge-card:hover { box-shadow: var(--shadow-hover); transform: translateY(-2px); border-color: var(--coral); }
+.badge-card.in { background: #eafaf2; border-color: #b8e6cf; }
+.badge-name { font-weight: 600; line-height: 1.2; }
+.badge-state { font-size: .78rem; color: var(--muted); }
+.badge-elapsed { color: var(--ok); font-weight: 600; }
+
+/* =========================================================
+   TEMPS DE TRAVAIL (table)
+   ========================================================= */
+.t-table-wrap { overflow-x: auto; border: 1px solid var(--line); border-radius: var(--radius); box-shadow: var(--shadow); }
+.t-table { width: 100%; border-collapse: collapse; background: #fff; min-width: 560px; }
+.t-table th, .t-table td { padding: 12px 14px; text-align: center; border-bottom: 1px solid var(--line); font-size: .9rem; }
+.t-table th { background: var(--bg); font-family: var(--font-head); font-weight: 600; color: var(--muted); font-size: .8rem; text-transform: uppercase; letter-spacing: .03em; }
+.t-table tbody tr:last-child td { border-bottom: none; }
+.t-table .t-name { text-align: left; display: flex; align-items: center; gap: 8px; font-weight: 600; }
+.t-pos { color: var(--ok); }
+.t-neg { color: var(--danger); }
+
+.plain-card.off { opacity: .6; }
+
+/* =========================================================
+   RESPONSIVE
+   ========================================================= */
+@media (max-width: 760px) {
+  .p-stats { grid-template-columns: repeat(2, 1fr); }
+  .p-cols { grid-template-columns: 1fr; }
+  .pl-grid { overflow-x: auto; }
+  .pl-row { grid-template-columns: 140px repeat(7, minmax(74px, 1fr)); min-width: 660px; }
+  .badge-clock { font-size: 2.6rem; }
+}
