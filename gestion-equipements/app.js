@@ -34,42 +34,24 @@
   }
 
   function save() {
-    // Sauvegarde locale complète (avec photos/documents)
-    try {
-      localStorage.setItem(STORE_KEY, JSON.stringify(state));
-    } catch (e) {
-      toast("⚠ Mémoire pleine : pensez à réduire le nombre de photos ou à faire une sauvegarde.");
+    // Sauvegarde locale (cache hors-ligne)
+    try { localStorage.setItem(STORE_KEY, JSON.stringify(state)); } catch (e) {
+      toast("⚠ Mémoire locale pleine : faites une sauvegarde.");
     }
-    // Synchronisation Firestore (sans binaires pour respecter la limite 1 Mo)
+    // Synchronisation Firestore (photos/docs sont des URLs, pas de binaires)
     if (window.CybeleDB) {
-      window.CybeleDB.save("equipements", stripBinaries(state)).catch(() => {});
+      window.CybeleDB.save("equipements", state).catch(() => {});
     }
   }
 
-  // Retire photos et documents binaires avant envoi à Firestore
-  function stripBinaries(s) {
-    const c = JSON.parse(JSON.stringify(s));
-    (c.equipements || []).forEach(eq => {
-      eq.photos = (eq.photos || []).map(() => "__local__");
-      (eq.documents || []).forEach(d => { if (d.data) d.data = "__local__"; });
-    });
-    return c;
-  }
-
-  // Restaure photos/documents depuis le cache local après chargement cloud
-  function mergePhotosFromLocal(cloud, local) {
-    if (!local) return;
-    (cloud.equipements || []).forEach(eq => {
-      const loc = (local.equipements || []).find(e => e.id === eq.id);
-      if (!loc) return;
-      eq.photos = (eq.photos || []).map((p, i) =>
-        p === "__local__" ? ((loc.photos || [])[i] || "") : p);
-      (eq.documents || []).forEach(d => {
-        if (d.data !== "__local__") return;
-        const ld = (loc.documents || []).find(x => x.id === d.id);
-        if (ld) d.data = ld.data;
-      });
-    });
+  // Convertit un dataURL base64 en Blob pour l'upload Storage
+  function dataUrlToBlob(dataUrl) {
+    const [header, base64] = dataUrl.split(",");
+    const mime = header.match(/:(.*?);/)[1];
+    const binary = atob(base64);
+    const arr = new Uint8Array(binary.length);
+    for (let i = 0; i < binary.length; i++) arr[i] = binary.charCodeAt(i);
+    return new Blob([arr], { type: mime });
   }
 
   function uid() { return Date.now().toString(36) + Math.random().toString(36).slice(2, 7); }
@@ -788,7 +770,7 @@
      ÉVÉNEMENTS (délégation)
      ========================================================= */
   document.addEventListener("click", (e) => {
-    const t = e.target.closest("[data-nav],[data-open],[data-act],[data-filter],[data-type],[data-tab],[data-toggle-carnet],[data-edit-carnet],[data-del-carnet],[data-edit-regle],[data-del-regle],[data-edit-contrat],[data-del-contrat],[data-edit-contact],[data-del-contact],[data-del-doc],[data-lightbox],[data-delphoto],[data-lightbox-doc]");
+    const t = e.target.closest("[data-nav],[data-open],[data-act],[data-filter],[data-type],[data-tab],[data-toggle-carnet],[data-edit-carnet],[data-del-carnet],[data-edit-regle],[data-del-regle],[data-edit-contrat],[data-del-contrat],[data-edit-contact],[data-del-contact],[data-del-doc],[data-open-doc],[data-lightbox],[data-delphoto],[data-lightbox-doc]");
     if (!t) return;
     const eq = getEq(view.id);
 
@@ -802,10 +784,16 @@
     // Photos
     if (t.dataset.lightbox !== undefined && eq) return lightbox(eq.photos[+t.dataset.lightbox]);
     if (t.dataset.delphoto !== undefined && eq) {
-      if (confirm("Supprimer cette photo ?")) { eq.photos.splice(+t.dataset.delphoto, 1); save(); renderDetail(); }
+      if (confirm("Supprimer cette photo ?")) {
+        const url = eq.photos[+t.dataset.delphoto];
+        eq.photos.splice(+t.dataset.delphoto, 1);
+        save(); renderDetail();
+        if (url && url.startsWith("https://") && window.CybeleDB) window.CybeleDB.deleteFile(url).catch(() => {});
+      }
       return;
     }
-    if (t.dataset.lightboxDoc && eq) { const dc = eq.documents.find(d => d.id === t.dataset.lightboxDoc); if (dc) lightbox(dc.data); return; }
+    if (t.dataset.lightboxDoc && eq) { const dc = eq.documents.find(d => d.id === t.dataset.lightboxDoc); if (dc) lightbox(dc.data || dc.url); return; }
+    if (t.dataset.openDoc && eq) { const dc = eq.documents.find(d => d.id === t.dataset.openDoc); if (dc && (dc.url || dc.data)) window.open(dc.url || dc.data, "_blank"); return; }
 
     // Carnet
     if (t.dataset.toggleCarnet && !e.target.closest(".tl-actions")) { t.classList.toggle("open"); return; }
@@ -825,7 +813,15 @@
     if (t.dataset.delContact && eq) { if (confirm("Supprimer ce contact ?")) { eq.contacts = eq.contacts.filter(x => x.id !== t.dataset.delContact); save(); renderTab(eq); } return; }
 
     // Documents
-    if (t.dataset.delDoc && eq) { if (confirm("Supprimer ce document ?")) { eq.documents = eq.documents.filter(x => x.id !== t.dataset.delDoc); save(); renderTab(eq); } return; }
+    if (t.dataset.delDoc && eq) {
+      if (confirm("Supprimer ce document ?")) {
+        const dc = eq.documents.find(x => x.id === t.dataset.delDoc);
+        eq.documents = eq.documents.filter(x => x.id !== t.dataset.delDoc);
+        save(); renderTab(eq);
+        if (dc && dc.url && dc.url.startsWith("https://") && window.CybeleDB) window.CybeleDB.deleteFile(dc.url).catch(() => {});
+      }
+      return;
+    }
 
     // Actions
     switch (t.dataset.act) {
@@ -838,7 +834,19 @@
         }
         return;
       case "add-photo": return pickFile("image/*", true, async (files) => {
-        for (const f of files) { const data = await readImageCompressed(f, 1000, 0.72); eq.photos.push(data); }
+        toast("Envoi en cours…");
+        for (const f of files) {
+          const dataUrl = await readImageCompressed(f, 1000, 0.72);
+          if (window.CybeleDB) {
+            try {
+              const url = await window.CybeleDB.uploadFile(
+                "equipements/" + eq.id + "/photos/" + uid() + ".jpg",
+                dataUrlToBlob(dataUrl)
+              );
+              eq.photos.push(url);
+            } catch (e) { eq.photos.push(dataUrl); } // fallback local
+          } else { eq.photos.push(dataUrl); }
+        }
         save(); renderDetail(); toast("Photo ajoutée.");
       });
       case "add-carnet": return modalCarnet(eq, null);
@@ -856,10 +864,27 @@
       const isImg = f.type.startsWith("image/");
       const nom = prompt("Nom du document :", f.name.replace(/\.[^.]+$/, "")) || f.name;
       try {
-        let data;
-        if (isImg) data = await readImageCompressed(f, 1400, 0.7);
-        else { if (f.size > 1.5 * 1024 * 1024) { toast("PDF trop lourd (max ~1,5 Mo). Stockez plutôt le nom + une photo."); } data = await fileToDataURL(f); }
-        eq.documents.push({ id: uid(), nom, type: isImg ? "Photo" : "PDF", kind: isImg ? "image" : "pdf", date: new Date().toISOString().slice(0, 10), data });
+        toast("Envoi en cours…");
+        const docId = uid();
+        const ext = isImg ? "jpg" : "pdf";
+        let data, url = null;
+        if (window.CybeleDB) {
+          let blob;
+          if (isImg) { blob = dataUrlToBlob(await readImageCompressed(f, 1400, 0.7)); }
+          else {
+            if (f.size > 20 * 1024 * 1024) { toast("PDF trop lourd (max 20 Mo)."); return; }
+            blob = f;
+          }
+          url = await window.CybeleDB.uploadFile("equipements/" + eq.id + "/documents/" + docId + "." + ext, blob);
+          data = url;
+        } else {
+          if (isImg) data = await readImageCompressed(f, 1400, 0.7);
+          else {
+            if (f.size > 1.5 * 1024 * 1024) { toast("PDF trop lourd (max ~1,5 Mo)."); return; }
+            data = await fileToDataURL(f);
+          }
+        }
+        eq.documents.push({ id: docId, nom, type: isImg ? "Photo" : "PDF", kind: isImg ? "image" : "pdf", date: new Date().toISOString().slice(0, 10), data, url });
         save(); renderTab(eq); toast("Document ajouté.");
       } catch (err) { toast("Impossible d'ajouter ce fichier."); }
     });
@@ -927,12 +952,11 @@
           new Promise((_, rej) => setTimeout(() => rej(new Error("timeout")), 6000))
         ]);
         if (cloud) {
-          mergePhotosFromLocal(cloud, local);
           state = cloud;
           try { localStorage.setItem(STORE_KEY, JSON.stringify(state)); } catch (e) {}
         } else {
           state = local || seed();
-          if (state !== local) save(); // premier enregistrement cloud
+          if (!local) save(); // premier enregistrement cloud
         }
       } catch (e) {
         state = local || seed();
