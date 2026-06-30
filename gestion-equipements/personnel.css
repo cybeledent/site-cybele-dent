@@ -3,6 +3,13 @@
    Réutilise les variables et composants de app.css
    ========================================================= */
 
+/* Barre de session */
+.session-bar {
+  display: flex; align-items: center; justify-content: space-between;
+  background: #fdf0eb; border-radius: 10px;
+  padding: 8px 14px; margin-bottom: 14px; font-size: .88rem; color: var(--navy);
+}
+
 /* Sous-navigation du module */
 .p-subnav { display: flex; gap: 4px; flex-wrap: wrap; border-bottom: 1px solid var(--line); margin-bottom: 22px; overflow-x: auto; }
 .p-subtab {

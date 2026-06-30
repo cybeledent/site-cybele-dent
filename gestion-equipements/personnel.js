@@ -27,6 +27,7 @@
      ÉTAT
      ========================================================= */
   let state = null;
+  let sessionUser = null; // membre connecté pour cette session
   let view = { tab: "dashboard", weekStart: mondayOf(new Date()), monthRef: ymOf(new Date()) };
   let clockTimer = null;
 
@@ -37,6 +38,11 @@
   function migrate(s) {
     s.membres = s.membres || []; s.planning = s.planning || []; s.pointages = s.pointages || [];
     s.demandes = s.demandes || []; s.reglages = s.reglages || defaultReglages();
+    // Si aucun manager défini, auto-détecte par le nom "Filipputti"
+    if (!s.membres.some(m => m.isManager)) {
+      const f = s.membres.find(m => m.nom === "Filipputti");
+      if (f) f.isManager = true;
+    }
     return s;
   }
   function defaultReglages() { return { heuresSemaineDefaut: 35, congesAnnuelDefaut: 25, pauseDejeunerMin: 60 }; }
@@ -62,7 +68,7 @@
       ({ id, prenom, nom, role, binomeId, couleur, pin, heuresSemaine: h, congesAcquis: 25, actif: true });
 
     const membres = [
-      mk(m1, "Céline", "Filipputti", "Praticien", m3, COLORS[0], "1111", 39),
+      { ...mk(m1, "Céline", "Filipputti", "Praticien", m3, COLORS[0], "1111", 39), isManager: true },
       mk(m2, "Laura", "Agosto", "Praticien", m4, COLORS[1], "2222", 35),
       mk(m3, "Sophie", "Martin", "Assistant(e)", m1, COLORS[2], "3333", 35),
       mk(m4, "Julie", "Bernard", "Assistant(e)", m2, COLORS[3], "4444", 35),
@@ -198,8 +204,14 @@
   const root = document.getElementById("app-personnel");
 
   function render() {
+    if (!state) return;
+    if (!sessionUser) { renderLogin(); return; }
     if (clockTimer) { clearInterval(clockTimer); clockTimer = null; }
     root.innerHTML = `
+      <div class="session-bar">
+        <span>👤 ${esc(sessionUser.prenom)} ${esc(sessionUser.nom)}${sessionUser.isManager ? " · <strong>Employeur</strong>" : ""}</span>
+        <button class="btn-ghost-sm" data-pact="logout">Déconnecter</button>
+      </div>
       <div class="p-subnav">
         ${subTab("dashboard", "📊 Tableau de bord")}
         ${subTab("planning", "🗓 Planning")}
@@ -211,6 +223,48 @@
       <div id="p-content"></div>`;
     renderTab();
     window.scrollTo(0, 0);
+  }
+
+  function renderLogin() {
+    if (clockTimer) { clearInterval(clockTimer); clockTimer = null; }
+    const membres = (state.membres || []).filter(m => m.actif !== false);
+    root.innerHTML = `
+      <div style="max-width:380px;margin:60px auto;padding:0 16px">
+        <div class="card" style="padding:28px 24px">
+          <h2 style="margin-bottom:4px;font-size:1.2rem">👥 Module Personnel</h2>
+          <p style="color:var(--muted);margin-bottom:22px;font-size:.9rem">Identifiez-vous pour accéder au module.</p>
+          <div class="field">
+            <label>Qui êtes-vous ?</label>
+            <select id="login-membre">
+              <option value="">— Sélectionnez votre nom —</option>
+              ${membres.map(m => `<option value="${m.id}">${esc(m.prenom)} ${esc(m.nom)}</option>`).join("")}
+            </select>
+          </div>
+          <div class="field">
+            <label>Code PIN</label>
+            <input type="password" id="login-pin" inputmode="numeric" maxlength="6"
+              placeholder="••••" style="letter-spacing:.3em;font-size:1.2rem;text-align:center">
+          </div>
+          <button class="btn btn-primary" id="login-btn" style="width:100%;justify-content:center;margin-top:4px">Accéder →</button>
+          <p id="login-err" style="color:#c0392b;font-size:.85rem;margin-top:10px;display:none">Code PIN incorrect.</p>
+        </div>
+      </div>`;
+    const doLogin = () => {
+      const membreId = root.querySelector("#login-membre").value;
+      const pin = root.querySelector("#login-pin").value.trim();
+      if (!membreId) { toast("Sélectionnez votre nom."); return; }
+      const m = state.membres.find(x => x.id === membreId);
+      if (!m || m.pin !== pin) {
+        root.querySelector("#login-err").style.display = "block";
+        root.querySelector("#login-pin").value = "";
+        root.querySelector("#login-pin").focus();
+        return;
+      }
+      sessionUser = m;
+      render();
+    };
+    root.querySelector("#login-btn").onclick = doLogin;
+    root.querySelector("#login-pin").addEventListener("keydown", e => { if (e.key === "Enter") doLogin(); });
   }
   function subTab(id, label) {
     const n = id === "demandes" ? state.demandes.filter(d => d.statut === "en_attente").length : 0;
@@ -484,6 +538,15 @@
     const period = d.dateDebut === d.dateFin ? fmtDate(d.dateDebut) : fmtDate(d.dateDebut) + " → " + fmtDate(d.dateFin);
     const stBadge = d.statut === "valide" ? `<span class="due-badge ok">Validée</span>` :
       d.statut === "refuse" ? `<span class="due-badge late">Refusée</span>` : `<span class="due-badge warn">En attente</span>`;
+    const isManager = sessionUser && sessionUser.isManager;
+    const isOwnPending = sessionUser && d.membreId === sessionUser.id && d.statut === "en_attente";
+    const actions = d.statut === "en_attente"
+      ? (isManager
+          ? `<button class="btn-mini ok" data-valide="${d.id}">✓ Valider</button>
+             <button class="btn-mini no" data-refuse="${d.id}">✕ Refuser</button>
+             <button class="icon-btn del" data-del-demande="${d.id}" title="Supprimer">🗑</button>`
+          : (isOwnPending ? `<button class="icon-btn del" data-del-demande="${d.id}" title="Annuler ma demande">🗑</button>` : ""))
+      : (isManager ? `<button class="icon-btn del" data-del-demande="${d.id}">🗑</button>` : "");
     return `<div class="plain-card ${d.statut === "en_attente" ? "" : "ok-bg"}">
       <div class="pc-icon ${d.statut === "valide" ? "green" : d.statut === "refuse" ? "red" : "amber"}">${m ? avatar(m, 30) : "📩"}</div>
       <div class="pc-body">
@@ -492,10 +555,7 @@
       </div>
       <div class="pc-actions">
         ${stBadge}
-        ${d.statut === "en_attente" ? `
-          <button class="btn-mini ok" data-valide="${d.id}">✓ Valider</button>
-          <button class="btn-mini no" data-refuse="${d.id}">✕ Refuser</button>` :
-          `<button class="icon-btn del" data-del-demande="${d.id}">🗑</button>`}
+        ${actions}
       </div>
     </div>`;
   }
@@ -644,9 +704,23 @@
     if (t.dataset.pbadge) { const m = membre(t.dataset.pbadge); if (m) pointer(m); return; }
     if (t.dataset.editMembre) return modalMembre(membre(t.dataset.editMembre));
     if (t.dataset.delMembre) { if (confirm("Supprimer ce membre ? Son historique de pointages restera mais ne sera plus associé.")) { state.membres = state.membres.filter(x => x.id !== t.dataset.delMembre); save(); renderTab(); } return; }
-    if (t.dataset.valide) return traiterDemande(t.dataset.valide, "valide");
-    if (t.dataset.refuse) return traiterDemande(t.dataset.refuse, "refuse");
-    if (t.dataset.delDemande) { if (confirm("Supprimer cette demande ?")) { state.demandes = state.demandes.filter(x => x.id !== t.dataset.delDemande); save(); render(); } return; }
+    if (t.dataset.valide) {
+      if (!sessionUser || !sessionUser.isManager) { toast("Seul l'employeur peut valider une demande."); return; }
+      return traiterDemande(t.dataset.valide, "valide");
+    }
+    if (t.dataset.refuse) {
+      if (!sessionUser || !sessionUser.isManager) { toast("Seul l'employeur peut refuser une demande."); return; }
+      return traiterDemande(t.dataset.refuse, "refuse");
+    }
+    if (t.dataset.delDemande) {
+      const d = state.demandes.find(x => x.id === t.dataset.delDemande);
+      if (!d || !sessionUser) return;
+      if (!sessionUser.isManager && (d.membreId !== sessionUser.id || d.statut !== "en_attente")) {
+        toast("Vous ne pouvez annuler que vos propres demandes en attente."); return;
+      }
+      if (confirm("Supprimer cette demande ?")) { state.demandes = state.demandes.filter(x => x.id !== t.dataset.delDemande); save(); render(); }
+      return;
+    }
 
     switch (t.dataset.pact) {
       case "week-prev": view.weekStart = isoAdd(view.weekStart, -7); return renderTab();
@@ -654,6 +728,7 @@
       case "week-today": view.weekStart = mondayOf(new Date()); return renderTab();
       case "month-prev": view.monthRef = shiftMonth(view.monthRef, -1); return renderTab();
       case "month-next": view.monthRef = shiftMonth(view.monthRef, 1); return renderTab();
+      case "logout": sessionUser = null; render(); return;
       case "export-paie": return exportPaie();
       case "add-membre": return modalMembre(null);
       case "add-demande": return modalDemande();
