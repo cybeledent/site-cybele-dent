@@ -310,8 +310,14 @@ section { padding: 84px 0; }
   .parcours-track { grid-template-columns: 1fr; gap: 0; }
   .parcours-line { left: 28px; transform: translateX(-50%); top: 24px; bottom: 24px; right: auto; width: 4px; height: auto; }
   .parcours-progress { display: none; }
-  .pstep { text-align: left; display: grid; grid-template-columns: 56px 1fr; gap: 16px; align-items: start; padding: 14px 0; }
-  .pnum { margin: 0; }
+  .pstep {
+    text-align: left; display: grid;
+    grid-template-columns: 56px 1fr; column-gap: 18px; row-gap: 4px;
+    align-items: center; padding: 18px 0;
+  }
+  .pnum { margin: 0; grid-column: 1; grid-row: 1 / span 2; align-self: center; }
+  .pstep h3 { grid-column: 2; grid-row: 1; margin-bottom: 0; }
+  .pstep p { grid-column: 2; grid-row: 2; font-size: .92rem; line-height: 1.5; }
 }
 
 /* =========================================================
