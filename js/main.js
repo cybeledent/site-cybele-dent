@@ -18,8 +18,9 @@ document.addEventListener("DOMContentLoaded", function () {
         '<img class="annonce-logo" src="assets/logo.svg" alt="Cybèle Dent">' +
         '<span class="annonce-badge">Ouverture prochaine</span>' +
         '<h2>Le cabinet ouvre bientôt&nbsp;!</h2>' +
-        '<p>Le cabinet dentaire des <strong>Dr Céline Filipputti</strong> et <strong>Dr Laura Agosto</strong> ouvrira ses portes <strong>début septembre</strong>.</p>' +
-        '<p>La <strong>prise de rendez-vous en ligne</strong> sera disponible <strong>courant juillet</strong>.</p>' +
+        '<p>Le cabinet dentaire des <strong>Dr Céline Filipputti</strong> et <strong>Dr Laura Agosto</strong> ouvrira ses portes le <strong>31 août</strong>.</p>' +
+        '<p>La <strong>prise de rendez-vous en ligne est déjà possible</strong> dès maintenant.</p>' +
+        '<a class="btn btn-accent annonce-rdv" href="https://www.doctolib.fr/cabinet-dentaire/vienne/cybele-dent" target="_blank" rel="noopener">📅 Prendre rendez-vous</a>' +
         '<button class="btn btn-primary annonce-ok" type="button">Découvrir le cabinet</button>' +
       '</div>';
     document.body.appendChild(ov);
@@ -35,6 +36,7 @@ document.addEventListener("DOMContentLoaded", function () {
 
     ov.querySelector(".annonce-close").addEventListener("click", fermerAnnonce);
     ov.querySelector(".annonce-ok").addEventListener("click", fermerAnnonce);
+    ov.querySelector(".annonce-rdv").addEventListener("click", fermerAnnonce);
     ov.querySelector(".annonce-backdrop").addEventListener("click", fermerAnnonce);
     document.addEventListener("keydown", onEsc);
   }
