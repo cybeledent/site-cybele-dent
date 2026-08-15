@@ -1,0 +1,14 @@
+{
+  "name": "CybèleGestion",
+  "short_name": "CybèleGestion",
+  "description": "Gestion du cabinet dentaire Cybèle Dent — équipements et personnel.",
+  "start_url": "./index.html",
+  "scope": "./",
+  "display": "standalone",
+  "orientation": "portrait",
+  "background_color": "#f6f4f9",
+  "theme_color": "#e07a5f",
+  "icons": [
+    { "src": "appicon.png", "sizes": "512x512", "type": "image/png", "purpose": "any maskable" }
+  ]
+}
