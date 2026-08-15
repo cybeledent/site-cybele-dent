@@ -17,7 +17,8 @@
   const CARNET_CATS = ["Achat", "Maintenance", "Réparation", "Vente", "Poubelle"];
   const FREQUENCES = ["Ponctuel", "Hebdomadaire", "Mensuel", "Trimestriel", "Semestriel", "Annuel", "Biennal"];
   const CONTRAT_TYPES = ["Fin de garantie", "Fin de leasing", "Fin de contrat de maintenance", "Fin de location"];
-  const CONTACT_ROLES = ["SAV", "Réparateur", "Fournisseur", "Installateur", "Autre"];
+  const DEFAULT_CONTACT_ROLES = ["SAV", "Réparateur", "Fournisseur", "Installateur", "Commercial(e)", "Autre"];
+  const DEFAULT_CONTACT_CATEGORIES = ["Dentaire", "Stérilisation", "Informatique", "Plomberie", "Électricité", "Sécurité"];
 
   /* =========================================================
      ÉTAT
@@ -122,6 +123,8 @@
   function normalize(s) {
     if (!s) return s;
     if (!s.types) s.types = DEFAULT_TYPES.slice();
+    if (!Array.isArray(s.contactRoles) || !s.contactRoles.length) s.contactRoles = DEFAULT_CONTACT_ROLES.slice();
+    if (!Array.isArray(s.contactCategories)) s.contactCategories = DEFAULT_CONTACT_CATEGORIES.slice();
     if (!Array.isArray(s.repertoire)) s.repertoire = [];
     (s.equipements || []).forEach(eq => {
       if (!Array.isArray(eq.contactIds)) eq.contactIds = [];
@@ -346,6 +349,21 @@
   function contactMeta(c) {
     return `${c.tel ? "📞 " + esc(c.tel) : ""}${c.tel && c.email ? "&nbsp;&nbsp;" : ""}${c.email ? "✉ " + esc(c.email) : ""}`;
   }
+  function repertoireCardHTML(c) {
+    const used = equipmentsUsing(c.id);
+    return `<div class="plain-card contact-card">
+      <div class="pc-icon">👤</div>
+      <div class="pc-body">
+        <div class="pc-title">${esc(c.nom)} ${c.role ? `<span class="tag tag-role" style="margin-left:6px">${esc(c.role)}</span>` : ""}</div>
+        <div class="pc-meta">${contactMeta(c)}${(c.tel || c.email) ? " · " : ""}${used.length ? `🔧 ${used.length} équipement${used.length > 1 ? "s" : ""}` : "non rattaché"}</div>
+      </div>
+      <div class="pc-actions">
+        <button class="icon-btn" data-edit-repertoire="${c.id}">✎</button>
+        <button class="icon-btn del" data-del-repertoire="${c.id}">🗑</button>
+      </div>
+    </div>`;
+  }
+
   function renderRepertoire() {
     const reps = (state.repertoire || []).slice().sort((a, b) => (a.nom || "").localeCompare(b.nom || ""));
     let html = `
@@ -353,27 +371,25 @@
       <div class="list-top">
         <h1 class="list-title">📇 Répertoire <span class="count">(${reps.length})</span></h1>
         <span class="spacer"></span>
+        <button class="btn btn-soft" data-act="manage-lists">⚙ Rôles & catégories</button>
         <button class="btn btn-primary" data-act="new-repertoire">＋ Nouveau contact</button>
       </div>
-      <p class="pc-meta" style="margin-bottom:16px">Vos contacts réutilisables (SAV, réparateurs, fournisseurs…). Créez-les ici une fois, puis ajoutez-les à vos équipements en un clic.</p>
+      <p class="pc-meta" style="margin-bottom:16px">Vos contacts réutilisables, classés par catégorie. Créez-les une fois, puis ajoutez-les à vos équipements en un clic.</p>
     `;
     if (!reps.length) {
       html += `<div class="empty"><div class="em-ico">📇</div><h3>Répertoire vide</h3><p>Ajoutez votre premier contact réutilisable.</p></div>`;
     } else {
-      html += reps.map(c => {
-        const used = equipmentsUsing(c.id);
-        return `<div class="plain-card contact-card">
-          <div class="pc-icon">👤</div>
-          <div class="pc-body">
-            <div class="pc-title">${esc(c.nom)} ${c.role ? `<span class="tag tag-role" style="margin-left:6px">${esc(c.role)}</span>` : ""}</div>
-            <div class="pc-meta">${contactMeta(c)}${(c.tel || c.email) ? " · " : ""}${used.length ? `🔧 ${used.length} équipement${used.length > 1 ? "s" : ""}` : "non rattaché"}</div>
-          </div>
-          <div class="pc-actions">
-            <button class="icon-btn" data-edit-repertoire="${c.id}">✎</button>
-            <button class="icon-btn del" data-del-repertoire="${c.id}">🗑</button>
-          </div>
-        </div>`;
-      }).join("");
+      // Regroupement par catégorie (ordre de la liste des catégories, puis « Sans catégorie »)
+      const byCat = {};
+      reps.forEach(c => { const k = c.categorie || ""; (byCat[k] = byCat[k] || []).push(c); });
+      const order = (state.contactCategories || []).filter(cat => byCat[cat]);
+      Object.keys(byCat).forEach(k => { if (k && !order.includes(k)) order.push(k); });
+      const groups = order.map(cat => ({ cat, items: byCat[cat] }));
+      if (byCat[""]) groups.push({ cat: "", items: byCat[""] });
+      html += groups.map(g => `
+        <div class="tab-section-label" style="margin-top:20px">${g.cat ? "📂 " + esc(g.cat) : "Sans catégorie"} <span style="color:var(--muted);font-weight:400">(${g.items.length})</span></div>
+        ${g.items.map(repertoireCardHTML).join("")}
+      `).join("");
     }
     app.innerHTML = html;
   }
@@ -592,7 +608,7 @@
           <div class="pc-icon">👤</div>
           <div class="pc-body">
             <div class="pc-title">${esc(ct.nom)} ${ct.role ? `<span class="tag tag-role" style="margin-left:6px">${esc(ct.role)}</span>` : ""}</div>
-            <div class="pc-meta">${contactMeta(ct)}</div>
+            <div class="pc-meta">${contactMeta(ct)}${ct.categorie ? ((ct.tel || ct.email) ? " · " : "") + "📂 " + esc(ct.categorie) : ""}</div>
           </div>
           <div class="pc-actions">
             <button class="icon-btn" data-edit-contact="${ct.id}" title="Modifier (dans le répertoire)">✎</button>
@@ -842,22 +858,39 @@
     ov.querySelector("#new-contact-btn").onclick = () => { modalRoot.innerHTML = ""; modalEditContact(null, eq); };
   }
 
+  // Construit un <select> avec les options + une entrée « ＋ Nouveau… » (sentinelle __new__).
+  // includeEmpty : ajoute une option vide « — Aucune — » en tête.
+  function selectAdd(name, label, current, options, newLabel, includeEmpty) {
+    const opts = options.slice();
+    if (current && !opts.includes(current)) opts.unshift(current); // conserve la valeur actuelle même si retirée de la liste
+    return `<div class="field"><label>${esc(label)}</label>
+      <select name="${name}">
+        ${includeEmpty ? `<option value="" ${!current ? "selected" : ""}>— Aucune —</option>` : ""}
+        ${opts.map(o => `<option ${o === current ? "selected" : ""}>${esc(o)}</option>`).join("")}
+        <option value="__new__">${esc(newLabel)}</option>
+      </select></div>`;
+  }
+
   // Créer / modifier un contact DU RÉPERTOIRE. attachEq : rattache aussi à cet équipement.
   function modalEditContact(ct, attachEq) {
     const isNew = !ct;
-    ct = ct || { nom: "", role: "SAV", tel: "", email: "" };
+    ct = ct || { nom: "", role: "SAV", categorie: "", tel: "", email: "" };
     const body = `
       ${fieldText("nom", "Nom / Société *", ct.nom, { ph: "KaVo Kerr France" })}
-      ${fieldSelect("role", "Rôle", ct.role, CONTACT_ROLES)}
+      <div class="field-row">
+        ${selectAdd("role", "Rôle", ct.role, state.contactRoles, "＋ Nouveau rôle…", false)}
+        ${selectAdd("categorie", "Catégorie", ct.categorie || "", state.contactCategories, "＋ Nouvelle catégorie…", true)}
+      </div>
       <div class="field-row">
         ${fieldText("tel", "Téléphone", ct.tel, { type: "tel" })}
         ${fieldText("email", "Email", ct.email, { type: "email" })}
       </div>
     `;
-    openModal(isNew ? "Nouveau contact" : "Modifier le contact", body, (ov) => {
+    const ov = openModal(isNew ? "Nouveau contact" : "Modifier le contact", body, (ov) => {
       const nom = val(ov, "nom");
       if (!nom) { toast("Le nom est obligatoire."); return false; }
-      const data = { nom, role: val(ov, "role"), tel: val(ov, "tel"), email: val(ov, "email") };
+      const data = { nom, role: val(ov, "role"), categorie: val(ov, "categorie"), tel: val(ov, "tel"), email: val(ov, "email") };
+      if (data.role === "__new__") data.role = ""; if (data.categorie === "__new__") data.categorie = "";
       if (isNew) {
         const id = uid();
         state.repertoire.push({ id, ...data });
@@ -867,6 +900,75 @@
       if (view.name === "detail") renderTab(getEq(view.id));
       else renderRepertoire();
     });
+    wireAddSelect(ov.querySelector("[name=role]"), state.contactRoles, "Nom du nouveau rôle :");
+    wireAddSelect(ov.querySelector("[name=categorie]"), state.contactCategories, "Nom de la nouvelle catégorie :");
+  }
+
+  // Gère l'option « ＋ Nouveau… » d'un select : demande le nom, l'ajoute à la liste et le sélectionne.
+  function wireAddSelect(sel, list, promptMsg) {
+    if (!sel) return;
+    sel.dataset.prev = sel.value;
+    sel.onchange = () => {
+      if (sel.value === "__new__") {
+        const v = (prompt(promptMsg) || "").trim();
+        if (v) {
+          if (!list.includes(v)) list.push(v);
+          const opt = document.createElement("option"); opt.textContent = v; opt.value = v;
+          sel.insertBefore(opt, sel.querySelector('option[value="__new__"]'));
+          sel.value = v;
+        } else { sel.value = sel.dataset.prev || ""; }
+      }
+      sel.dataset.prev = sel.value;
+    };
+  }
+
+  // Gérer les listes de rôles et de catégories (ajouter / renommer / supprimer)
+  function modalManageLists() {
+    const rowsHTML = (items) => items.map(v => `
+      <div class="list-edit-row" data-orig="${esc(v)}">
+        <input class="le-input" value="${esc(v)}">
+        <button type="button" class="le-del" title="Supprimer">🗑</button>
+      </div>`).join("");
+    const body = `
+      <div class="tab-section-label" style="margin-top:0">Rôles</div>
+      <div id="roles-list">${rowsHTML(state.contactRoles)}</div>
+      <button type="button" class="btn-line" id="add-role" style="margin-bottom:4px">＋ Ajouter un rôle</button>
+      <div class="tab-section-label" style="margin-top:18px">Catégories</div>
+      <div id="cats-list">${rowsHTML(state.contactCategories)}</div>
+      <button type="button" class="btn-line" id="add-cat">＋ Ajouter une catégorie</button>
+      <p class="field-hint" style="margin-top:12px">Renommer un élément met à jour tous les contacts concernés. Supprimer un élément ne supprime pas les contacts.</p>
+    `;
+    const ov = openModal("Rôles & catégories", body, (ov) => {
+      const collect = (sel) => {
+        const newList = [], renameMap = {};
+        ov.querySelectorAll(sel + " .list-edit-row").forEach(r => {
+          const orig = r.dataset.orig, nv = r.querySelector("input").value.trim();
+          if (nv && !newList.includes(nv)) { newList.push(nv); if (orig && orig !== nv) renameMap[orig] = nv; }
+        });
+        return { newList, renameMap };
+      };
+      const roles = collect("#roles-list"), cats = collect("#cats-list");
+      if (!roles.newList.length) { toast("Gardez au moins un rôle."); return false; }
+      state.contactRoles = roles.newList;
+      state.contactCategories = cats.newList;
+      (state.repertoire || []).forEach(c => {
+        if (c.role && roles.renameMap[c.role]) c.role = roles.renameMap[c.role];
+        if (c.categorie && cats.renameMap[c.categorie]) c.categorie = cats.renameMap[c.categorie];
+      });
+      save(); renderRepertoire();
+    }, "Enregistrer");
+
+    const addRow = (containerId) => {
+      const div = document.createElement("div");
+      div.className = "list-edit-row"; div.dataset.orig = "";
+      div.innerHTML = `<input class="le-input" value=""><button type="button" class="le-del" title="Supprimer">🗑</button>`;
+      div.querySelector(".le-del").onclick = () => div.remove();
+      ov.querySelector(containerId).appendChild(div);
+      div.querySelector("input").focus();
+    };
+    ov.querySelector("#add-role").onclick = () => addRow("#roles-list");
+    ov.querySelector("#add-cat").onclick = () => addRow("#cats-list");
+    ov.querySelectorAll(".le-del").forEach(b => b.onclick = () => b.closest(".list-edit-row").remove());
   }
 
   /* =========================================================
@@ -962,6 +1064,7 @@
       case "add-contact": return modalAttachContact(eq);
       case "add-doc": return addDocument(eq);
       case "new-repertoire": return modalEditContact(null);
+      case "manage-lists": return modalManageLists();
     }
   });
 
