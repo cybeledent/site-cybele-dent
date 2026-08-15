@@ -538,18 +538,23 @@
   function tabDocs(eq) {
     const docs = eq.documents || [];
     return `
-      ${docs.length ? `<div class="doc-grid">${docs.map(dc => `
-        <div class="doc-card">
+      ${docs.length ? `<div class="doc-grid">${docs.map(dc => {
+        const isImg = dc.kind === "image" && dc.data;      // ancien format : image intégrée
+        const target = dc.lien || dc.url || dc.data;       // lien externe ou fichier
+        const thumb = isImg
+          ? `<img class="doc-thumb" src="${dc.data}" data-lightbox-doc="${dc.id}" alt="">`
+          : `<div class="doc-thumb" data-open-doc="${dc.id}">${dc.lien ? "🔗" : "📄"}</div>`;
+        return `<div class="doc-card">
           <button class="doc-del" data-del-doc="${dc.id}">🗑</button>
-          ${dc.data && dc.kind === "image"
-            ? `<img class="doc-thumb" src="${dc.data}" data-lightbox-doc="${dc.id}" alt="">`
-            : `<div class="doc-thumb" data-open-doc="${dc.id}">📄</div>`}
+          ${thumb}
           <div class="doc-info">
             <div class="doc-name">${esc(dc.nom)}</div>
             <div class="doc-sub"><span>${esc(dc.type || "Document")}</span><span>${fmtDate(dc.date)}</span></div>
+            ${target ? `<button class="link-action" data-open-doc="${dc.id}" style="margin-top:6px;padding:0">Ouvrir ↗</button>` : ""}
           </div>
-        </div>`).join("")}</div>` : `<div class="empty"><div class="em-ico">📎</div><h3>Aucun document</h3><p>Ajoutez factures, notices, certificats, photos…</p></div>`}
-      <div class="section-add"><button class="btn-line" data-act="add-doc">＋ Ajouter un document</button></div>`;
+        </div>`;
+      }).join("")}</div>` : `<div class="empty"><div class="em-ico">📎</div><h3>Aucun document</h3><p>Ajoutez le lien vers vos factures, notices, certificats… (stockés sur votre Drive).</p></div>`}
+      <div class="section-add"><button class="btn-line" data-act="add-doc">＋ Ajouter un document (lien)</button></div>`;
   }
 
   /* ---- Onglet Informations ---- */
@@ -785,15 +790,13 @@
     if (t.dataset.lightbox !== undefined && eq) return lightbox(eq.photos[+t.dataset.lightbox]);
     if (t.dataset.delphoto !== undefined && eq) {
       if (confirm("Supprimer cette photo ?")) {
-        const url = eq.photos[+t.dataset.delphoto];
         eq.photos.splice(+t.dataset.delphoto, 1);
         save(); renderDetail();
-        if (url && url.startsWith("https://") && window.CybeleDB) window.CybeleDB.deleteFile(url).catch(() => {});
       }
       return;
     }
     if (t.dataset.lightboxDoc && eq) { const dc = eq.documents.find(d => d.id === t.dataset.lightboxDoc); if (dc) lightbox(dc.data || dc.url); return; }
-    if (t.dataset.openDoc && eq) { const dc = eq.documents.find(d => d.id === t.dataset.openDoc); if (dc && (dc.url || dc.data)) window.open(dc.url || dc.data, "_blank"); return; }
+    if (t.dataset.openDoc && eq) { const dc = eq.documents.find(d => d.id === t.dataset.openDoc); const target = dc && (dc.lien || dc.url || dc.data); if (target) window.open(target, "_blank", "noopener"); return; }
 
     // Carnet
     if (t.dataset.toggleCarnet && !e.target.closest(".tl-actions")) { t.classList.toggle("open"); return; }
@@ -814,11 +817,9 @@
 
     // Documents
     if (t.dataset.delDoc && eq) {
-      if (confirm("Supprimer ce document ?")) {
-        const dc = eq.documents.find(x => x.id === t.dataset.delDoc);
+      if (confirm("Supprimer ce document ? (le fichier sur votre Drive n'est pas supprimé)")) {
         eq.documents = eq.documents.filter(x => x.id !== t.dataset.delDoc);
         save(); renderTab(eq);
-        if (dc && dc.url && dc.url.startsWith("https://") && window.CybeleDB) window.CybeleDB.deleteFile(dc.url).catch(() => {});
       }
       return;
     }
@@ -834,20 +835,11 @@
         }
         return;
       case "add-photo": return pickFile("image/*", true, async (files) => {
-        toast("Envoi en cours…");
         for (const f of files) {
-          const dataUrl = await readImageCompressed(f, 1000, 0.72);
-          if (window.CybeleDB) {
-            try {
-              const url = await window.CybeleDB.uploadFile(
-                "equipements/" + eq.id + "/photos/" + uid() + ".jpg",
-                dataUrlToBlob(dataUrl)
-              );
-              eq.photos.push(url);
-            } catch (e) { eq.photos.push(dataUrl); } // fallback local
-          } else { eq.photos.push(dataUrl); }
+          const dataUrl = await readImageCompressed(f, 900, 0.68); // compressée, stockée dans la base (sans Storage)
+          eq.photos.push(dataUrl);
         }
-        save(); renderDetail(); toast("Photo ajoutée.");
+        save(); renderDetail(); toast(files.length > 1 ? "Photos ajoutées." : "Photo ajoutée.");
       });
       case "add-carnet": return modalCarnet(eq, null);
       case "add-regle": return modalRegle(eq, null);
@@ -857,37 +849,22 @@
     }
   });
 
-  /* ---- Ajout de document ---- */
+  /* ---- Ajout de document (par lien : Drive, etc.) ---- */
   function addDocument(eq) {
-    pickFile("image/*,application/pdf", false, async (files) => {
-      const f = files[0]; if (!f) return;
-      const isImg = f.type.startsWith("image/");
-      const nom = prompt("Nom du document :", f.name.replace(/\.[^.]+$/, "")) || f.name;
-      try {
-        toast("Envoi en cours…");
-        const docId = uid();
-        const ext = isImg ? "jpg" : "pdf";
-        let data, url = null;
-        if (window.CybeleDB) {
-          let blob;
-          if (isImg) { blob = dataUrlToBlob(await readImageCompressed(f, 1400, 0.7)); }
-          else {
-            if (f.size > 20 * 1024 * 1024) { toast("PDF trop lourd (max 20 Mo)."); return; }
-            blob = f;
-          }
-          url = await window.CybeleDB.uploadFile("equipements/" + eq.id + "/documents/" + docId + "." + ext, blob);
-          data = url;
-        } else {
-          if (isImg) data = await readImageCompressed(f, 1400, 0.7);
-          else {
-            if (f.size > 1.5 * 1024 * 1024) { toast("PDF trop lourd (max ~1,5 Mo)."); return; }
-            data = await fileToDataURL(f);
-          }
-        }
-        eq.documents.push({ id: docId, nom, type: isImg ? "Photo" : "PDF", kind: isImg ? "image" : "pdf", date: new Date().toISOString().slice(0, 10), data, url });
-        save(); renderTab(eq); toast("Document ajouté.");
-      } catch (err) { toast("Impossible d'ajouter ce fichier."); }
-    });
+    const body = `
+      ${fieldText("nom", "Nom du document *", "", { ph: "Facture, notice, certificat de conformité…" })}
+      ${fieldText("lien", "Lien vers le document *", "", { ph: "https://drive.google.com/…" })}
+      <div class="field-hint">Déposez le fichier sur votre Drive (cybeledent@gmail.com), copiez le <strong>lien de partage</strong> et collez-le ici. Un clic l'ouvrira. Pensez à autoriser l'accès dans le partage Drive.</div>
+    `;
+    openModal("Ajouter un document", body, (ov) => {
+      const nom = val(ov, "nom");
+      let lien = val(ov, "lien");
+      if (!nom) { toast("Le nom est obligatoire."); return false; }
+      if (!lien) { toast("Le lien est obligatoire."); return false; }
+      if (!/^https?:\/\//i.test(lien)) lien = "https://" + lien;
+      eq.documents.push({ id: uid(), nom, type: "Lien", kind: "lien", lien, date: new Date().toISOString().slice(0, 10) });
+      save(); renderTab(eq); toast("Document ajouté.");
+    }, "Ajouter");
   }
 
   function fileToDataURL(file) {
