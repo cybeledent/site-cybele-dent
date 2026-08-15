@@ -1,0 +1,18 @@
+# ==========================================================
+# Cybèle Dent — redirections canoniques (SEO)
+# Objectif : une seule adresse officielle = https://www.cybele-dent.fr/
+# Toutes les variantes (sans www, en http, /index.html) y sont redirigées.
+# ==========================================================
+<IfModule mod_rewrite.c>
+  RewriteEngine On
+
+  # 1. Forcer HTTPS + www en une seule redirection
+  RewriteCond %{HTTPS} off [OR]
+  RewriteCond %{HTTP_HOST} !^www\.cybele-dent\.fr$ [NC]
+  RewriteRule ^ https://www.cybele-dent.fr%{REQUEST_URI} [R=301,L]
+
+  # 2. Rediriger la page d'accueil /index.html vers / (racine)
+  #    (uniquement l'accueil : la condition sur THE_REQUEST évite d'affecter les sous-dossiers)
+  RewriteCond %{THE_REQUEST} \s/index\.html[\s?] [NC]
+  RewriteRule ^index\.html$ / [R=301,L]
+</IfModule>
