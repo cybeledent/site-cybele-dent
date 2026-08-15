@@ -357,6 +357,13 @@ input, select, textarea { font-family: inherit; font-size: 1rem; }
 
 .contact-card .pc-icon { background: var(--coral-light); }
 
+/* Sélection de contacts depuis le répertoire */
+.rep-pick-list { display: flex; flex-direction: column; gap: 6px; max-height: 300px; overflow-y: auto; margin-bottom: 4px; }
+.rep-pick { display: flex; align-items: center; gap: 10px; padding: 10px 12px; border: 1px solid var(--line); border-radius: 10px; cursor: pointer; font-size: .92rem; }
+.rep-pick:hover { border-color: var(--coral); background: var(--coral-light); }
+.rep-pick input { width: 18px; height: 18px; accent-color: var(--coral); flex-shrink: 0; }
+.rep-or { text-align: center; color: var(--muted); margin: 12px 0; font-size: .9rem; }
+
 /* Informations (formulaire lecture) */
 .info-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 1px; background: var(--line); border: 1px solid var(--line); border-radius: var(--radius-sm); overflow: hidden; }
 .info-cell { background: #fff; padding: 13px 16px; }

@@ -115,6 +115,36 @@
   }
 
   /* =========================================================
+     RÉPERTOIRE DE CONTACTS (partagé entre équipements)
+     ========================================================= */
+  // Migre les contacts embarqués (ancien format eq.contacts) vers un répertoire
+  // central state.repertoire, et remplace par des références eq.contactIds.
+  function normalize(s) {
+    if (!s) return s;
+    if (!s.types) s.types = DEFAULT_TYPES.slice();
+    if (!Array.isArray(s.repertoire)) s.repertoire = [];
+    (s.equipements || []).forEach(eq => {
+      if (!Array.isArray(eq.contactIds)) eq.contactIds = [];
+      if (Array.isArray(eq.contacts) && eq.contacts.length) {
+        eq.contacts.forEach(ct => {
+          if (!ct || !ct.nom) return;
+          let rep = s.repertoire.find(r => (r.nom || "").toLowerCase() === (ct.nom || "").toLowerCase());
+          if (!rep) {
+            rep = { id: ct.id || uid(), nom: ct.nom || "", role: ct.role || "", tel: ct.tel || "", email: ct.email || "" };
+            s.repertoire.push(rep);
+          }
+          if (!eq.contactIds.includes(rep.id)) eq.contactIds.push(rep.id);
+        });
+      }
+      delete eq.contacts; // converti au format référencé
+    });
+    return s;
+  }
+  function contactById(id) { return (state.repertoire || []).find(c => c.id === id); }
+  function eqContacts(eq) { return (eq.contactIds || []).map(contactById).filter(Boolean); }
+  function equipmentsUsing(contactId) { return (state.equipements || []).filter(eq => (eq.contactIds || []).includes(contactId)); }
+
+  /* =========================================================
      UTILITAIRES DATE / ÉCHÉANCES
      ========================================================= */
   const MOIS = ["janv.", "févr.", "mars", "avr.", "mai", "juin", "juil.", "août", "sept.", "oct.", "nov.", "déc."];
@@ -210,6 +240,7 @@
 
   function render() {
     if (view.name === "detail") renderDetail();
+    else if (view.name === "repertoire") renderRepertoire();
     else renderList();
     window.scrollTo(0, 0);
   }
@@ -255,6 +286,7 @@
           ${soon ? `<span class="a-soon">${soon} à venir</span>` : ""}
         </div>` : ""}
         <span class="spacer"></span>
+        <button class="btn btn-soft" data-nav="repertoire">📇 Répertoire</button>
         <button class="btn btn-primary" data-act="new-eq">＋ Nouvel équipement</button>
       </div>
 
@@ -310,12 +342,48 @@
     }
   }
 
+  /* ---------- RÉPERTOIRE ---------- */
+  function contactMeta(c) {
+    return `${c.tel ? "📞 " + esc(c.tel) : ""}${c.tel && c.email ? "&nbsp;&nbsp;" : ""}${c.email ? "✉ " + esc(c.email) : ""}`;
+  }
+  function renderRepertoire() {
+    const reps = (state.repertoire || []).slice().sort((a, b) => (a.nom || "").localeCompare(b.nom || ""));
+    let html = `
+      <button class="detail-back" data-nav="list">← Équipements</button>
+      <div class="list-top">
+        <h1 class="list-title">📇 Répertoire <span class="count">(${reps.length})</span></h1>
+        <span class="spacer"></span>
+        <button class="btn btn-primary" data-act="new-repertoire">＋ Nouveau contact</button>
+      </div>
+      <p class="pc-meta" style="margin-bottom:16px">Vos contacts réutilisables (SAV, réparateurs, fournisseurs…). Créez-les ici une fois, puis ajoutez-les à vos équipements en un clic.</p>
+    `;
+    if (!reps.length) {
+      html += `<div class="empty"><div class="em-ico">📇</div><h3>Répertoire vide</h3><p>Ajoutez votre premier contact réutilisable.</p></div>`;
+    } else {
+      html += reps.map(c => {
+        const used = equipmentsUsing(c.id);
+        return `<div class="plain-card contact-card">
+          <div class="pc-icon">👤</div>
+          <div class="pc-body">
+            <div class="pc-title">${esc(c.nom)} ${c.role ? `<span class="tag tag-role" style="margin-left:6px">${esc(c.role)}</span>` : ""}</div>
+            <div class="pc-meta">${contactMeta(c)}${(c.tel || c.email) ? " · " : ""}${used.length ? `🔧 ${used.length} équipement${used.length > 1 ? "s" : ""}` : "non rattaché"}</div>
+          </div>
+          <div class="pc-actions">
+            <button class="icon-btn" data-edit-repertoire="${c.id}">✎</button>
+            <button class="icon-btn del" data-del-repertoire="${c.id}">🗑</button>
+          </div>
+        </div>`;
+      }).join("");
+    }
+    app.innerHTML = html;
+  }
+
   function cardHTML(eq) {
     const st = equipState(eq);
     const stClass = st === "panne" ? "s-panne" : st === "maint" ? "s-maint" : "";
     const rule = nextRule(eq);
     const garantie = (eq.contrats || []).find(c => c.type === "Fin de garantie");
-    const mainContact = (eq.contacts || [])[0];
+    const mainContact = eqContacts(eq)[0];
     const thumb = (eq.photos && eq.photos[0])
       ? `<img class="eq-card-thumb" src="${eq.photos[0]}" alt="">`
       : `<div class="eq-card-thumb">${typeEmoji(eq.type)}</div>`;
@@ -517,20 +585,20 @@
 
   /* ---- Onglet Contacts ---- */
   function tabContacts(eq) {
-    const cs = eq.contacts || [];
+    const cs = eqContacts(eq);
     return `
       ${cs.length ? cs.map(ct => `
         <div class="plain-card contact-card">
           <div class="pc-icon">👤</div>
           <div class="pc-body">
             <div class="pc-title">${esc(ct.nom)} ${ct.role ? `<span class="tag tag-role" style="margin-left:6px">${esc(ct.role)}</span>` : ""}</div>
-            <div class="pc-meta">${ct.tel ? "📞 " + esc(ct.tel) : ""}${ct.tel && ct.email ? "&nbsp;&nbsp;" : ""}${ct.email ? "✉ " + esc(ct.email) : ""}</div>
+            <div class="pc-meta">${contactMeta(ct)}</div>
           </div>
           <div class="pc-actions">
-            <button class="icon-btn" data-edit-contact="${ct.id}">✎</button>
-            <button class="icon-btn del" data-del-contact="${ct.id}">🗑</button>
+            <button class="icon-btn" data-edit-contact="${ct.id}" title="Modifier (dans le répertoire)">✎</button>
+            <button class="icon-btn del" data-detach-contact="${ct.id}" title="Retirer de cet équipement">✕</button>
           </div>
-        </div>`).join("") : `<div class="empty"><div class="em-ico">👥</div><h3>Aucun contact</h3><p>Ajoutez les contacts liés à cet équipement (SAV, réparateur, fournisseur…).</p></div>`}
+        </div>`).join("") : `<div class="empty"><div class="em-ico">👥</div><h3>Aucun contact</h3><p>Ajoutez un contact du répertoire, ou créez-en un nouveau.</p></div>`}
       <div class="section-add"><button class="btn-line" data-act="add-contact">＋ Ajouter un contact</button></div>`;
   }
 
@@ -662,7 +730,7 @@
         prixAchat: val(ov, "prixAchat"), notes: val(ov, "notes"),
       };
       if (isNew) {
-        const nEq = { id: uid(), nom, marque: val(ov, "marque"), modele: val(ov, "modele"), type, lieu: val(ov, "lieu"), statut, photos: [], carnet: [], regles: [], contrats: [], contacts: [], documents: [], infos };
+        const nEq = { id: uid(), nom, marque: val(ov, "marque"), modele: val(ov, "modele"), type, lieu: val(ov, "lieu"), statut, photos: [], carnet: [], regles: [], contrats: [], contactIds: [], documents: [], infos };
         state.equipements.unshift(nEq);
         view = { ...view, name: "detail", id: nEq.id, tab: "carnet" };
       } else {
@@ -676,7 +744,7 @@
   function modalCarnet(eq, item) {
     const isNew = !item;
     item = item || { date: new Date().toISOString().slice(0, 10), categorie: "Maintenance", description: "", montant: "", contact: "", detail: "" };
-    const contactNames = (eq.contacts || []).map(c => c.nom);
+    const contactNames = (state.repertoire || []).map(c => c.nom);
     const body = `
       <div class="field-row">
         ${fieldText("date", "Date", item.date, { type: "date" })}
@@ -706,7 +774,7 @@
   function modalRegle(eq, rule) {
     const isNew = !rule;
     rule = rule || { nom: "", frequence: "Annuel", echeance: "", contact: "" };
-    const contactNames = (eq.contacts || []).map(c => c.nom);
+    const contactNames = (state.repertoire || []).map(c => c.nom);
     const body = `
       ${fieldText("nom", "Intitulé de la règle *", rule.nom, { ph: "Révision annuelle" })}
       <div class="field-row">
@@ -749,8 +817,33 @@
     });
   }
 
-  /* ---- Contact ---- */
-  function modalContact(eq, ct) {
+  /* ---- Contact : rattacher (depuis le répertoire) ou créer ---- */
+  function modalAttachContact(eq) {
+    const available = (state.repertoire || []).filter(c => !(eq.contactIds || []).includes(c.id))
+      .sort((a, b) => (a.nom || "").localeCompare(b.nom || ""));
+    const body = `
+      ${available.length ? `
+        <div class="tab-section-label" style="margin-top:0">Choisir dans le répertoire</div>
+        <div class="rep-pick-list">
+          ${available.map(c => `<label class="rep-pick">
+            <input type="checkbox" value="${c.id}">
+            <span><strong>${esc(c.nom)}</strong>${c.role ? ` <span class="tag tag-role">${esc(c.role)}</span>` : ""}${c.tel ? ` · ${esc(c.tel)}` : ""}</span>
+          </label>`).join("")}
+        </div>` : `<p class="pc-meta">Le répertoire est vide (ou tous ses contacts sont déjà rattachés).</p>`}
+      <div class="rep-or">— ou —</div>
+      <button type="button" class="btn-line" id="new-contact-btn">＋ Créer un nouveau contact</button>
+    `;
+    const ov = openModal("Ajouter un contact", body, (ov) => {
+      const ids = Array.from(ov.querySelectorAll(".rep-pick input:checked")).map(i => i.value);
+      if (!ids.length) { toast("Cochez un contact, ou créez-en un nouveau."); return false; }
+      ids.forEach(id => { if (!eq.contactIds.includes(id)) eq.contactIds.push(id); });
+      save(); renderTab(eq);
+    }, "Rattacher");
+    ov.querySelector("#new-contact-btn").onclick = () => { modalRoot.innerHTML = ""; modalEditContact(null, eq); };
+  }
+
+  // Créer / modifier un contact DU RÉPERTOIRE. attachEq : rattache aussi à cet équipement.
+  function modalEditContact(ct, attachEq) {
     const isNew = !ct;
     ct = ct || { nom: "", role: "SAV", tel: "", email: "" };
     const body = `
@@ -761,13 +854,18 @@
         ${fieldText("email", "Email", ct.email, { type: "email" })}
       </div>
     `;
-    openModal(isNew ? "Ajouter un contact" : "Modifier le contact", body, (ov) => {
+    openModal(isNew ? "Nouveau contact" : "Modifier le contact", body, (ov) => {
       const nom = val(ov, "nom");
       if (!nom) { toast("Le nom est obligatoire."); return false; }
       const data = { nom, role: val(ov, "role"), tel: val(ov, "tel"), email: val(ov, "email") };
-      if (isNew) { eq.contacts.push({ id: uid(), ...data }); }
-      else { Object.assign(ct, data); }
-      save(); renderTab(eq);
+      if (isNew) {
+        const id = uid();
+        state.repertoire.push({ id, ...data });
+        if (attachEq && !attachEq.contactIds.includes(id)) attachEq.contactIds.push(id);
+      } else { Object.assign(ct, data); }
+      save();
+      if (view.name === "detail") renderTab(getEq(view.id));
+      else renderRepertoire();
     });
   }
 
@@ -775,12 +873,13 @@
      ÉVÉNEMENTS (délégation)
      ========================================================= */
   document.addEventListener("click", (e) => {
-    const t = e.target.closest("[data-nav],[data-open],[data-act],[data-filter],[data-type],[data-tab],[data-toggle-carnet],[data-edit-carnet],[data-del-carnet],[data-edit-regle],[data-del-regle],[data-edit-contrat],[data-del-contrat],[data-edit-contact],[data-del-contact],[data-del-doc],[data-open-doc],[data-lightbox],[data-delphoto],[data-lightbox-doc]");
+    const t = e.target.closest("[data-nav],[data-open],[data-act],[data-filter],[data-type],[data-tab],[data-toggle-carnet],[data-edit-carnet],[data-del-carnet],[data-edit-regle],[data-del-regle],[data-edit-contrat],[data-del-contrat],[data-edit-contact],[data-detach-contact],[data-edit-repertoire],[data-del-repertoire],[data-del-doc],[data-open-doc],[data-lightbox],[data-delphoto],[data-lightbox-doc]");
     if (!t) return;
     const eq = getEq(view.id);
 
     // Navigation
     if (t.dataset.nav === "list") { view = { ...view, name: "list", id: null }; return render(); }
+    if (t.dataset.nav === "repertoire") { view = { ...view, name: "repertoire", id: null }; return render(); }
     if (t.dataset.open) { view = { ...view, name: "detail", id: t.dataset.open, tab: "carnet" }; return render(); }
     if (t.dataset.tab) { view.tab = t.dataset.tab; document.querySelectorAll(".tab").forEach(b => b.classList.toggle("active", b.dataset.tab === view.tab)); return renderTab(eq); }
     if (t.dataset.filter) { view.filter = t.dataset.filter; return renderList(); }
@@ -811,9 +910,25 @@
     if (t.dataset.editContrat && eq) return modalContrat(eq, eq.contrats.find(x => x.id === t.dataset.editContrat));
     if (t.dataset.delContrat && eq) { if (confirm("Supprimer cette échéance ?")) { eq.contrats = eq.contrats.filter(x => x.id !== t.dataset.delContrat); save(); renderTab(eq); } return; }
 
-    // Contacts
-    if (t.dataset.editContact && eq) return modalContact(eq, eq.contacts.find(x => x.id === t.dataset.editContact));
-    if (t.dataset.delContact && eq) { if (confirm("Supprimer ce contact ?")) { eq.contacts = eq.contacts.filter(x => x.id !== t.dataset.delContact); save(); renderTab(eq); } return; }
+    // Contacts (rattachés à un équipement) — édition = modif du répertoire, retrait = détachement
+    if (t.dataset.editContact) return modalEditContact(contactById(t.dataset.editContact));
+    if (t.dataset.detachContact && eq) { eq.contactIds = (eq.contactIds || []).filter(id => id !== t.dataset.detachContact); save(); renderTab(eq); return; }
+
+    // Répertoire
+    if (t.dataset.editRepertoire) return modalEditContact(contactById(t.dataset.editRepertoire));
+    if (t.dataset.delRepertoire) {
+      const c = contactById(t.dataset.delRepertoire); if (!c) return;
+      const used = equipmentsUsing(c.id);
+      const msg = used.length
+        ? "« " + c.nom + " » est rattaché à " + used.length + " équipement(s). Le supprimer du répertoire le retirera aussi de ces équipements. Continuer ?"
+        : "Supprimer « " + c.nom + " » du répertoire ?";
+      if (confirm(msg)) {
+        state.equipements.forEach(eq2 => { eq2.contactIds = (eq2.contactIds || []).filter(id => id !== c.id); });
+        state.repertoire = state.repertoire.filter(x => x.id !== c.id);
+        save(); renderRepertoire();
+      }
+      return;
+    }
 
     // Documents
     if (t.dataset.delDoc && eq) {
@@ -844,8 +959,9 @@
       case "add-carnet": return modalCarnet(eq, null);
       case "add-regle": return modalRegle(eq, null);
       case "add-contrat": return modalContrat(eq, null);
-      case "add-contact": return modalContact(eq, null);
+      case "add-contact": return modalAttachContact(eq);
       case "add-doc": return addDocument(eq);
+      case "new-repertoire": return modalEditContact(null);
     }
   });
 
@@ -907,8 +1023,7 @@
       getState: () => state,
       setState: (s) => {
         if (!s || !Array.isArray(s.equipements)) return false;
-        state = s;
-        if (!state.types) state.types = DEFAULT_TYPES.slice();
+        state = normalize(s);
         save();
         view = { name: "list", id: null, tab: "carnet", search: "", filter: "all", type: null };
         render();
@@ -943,6 +1058,7 @@
     } else {
       state = local || seed();
     }
+    state = normalize(state);
     render();
   }
   init();
