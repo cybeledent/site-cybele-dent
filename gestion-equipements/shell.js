@@ -113,6 +113,74 @@
     modalRoot.querySelector(".modal-overlay").onclick = (ev) => { if (ev.target === ev.currentTarget) close(); };
   };
 
+  /* =========================================================
+     PORTE D'ENTRÉE — AUTHENTIFICATION
+     ========================================================= */
+  (function setupAuthGate() {
+    if (!window.CybeleAuth) return; // pas de Firebase (mode local) → pas de porte
+
+    const gate = document.createElement("div");
+    gate.className = "auth-gate";
+    gate.innerHTML =
+      '<div class="auth-card">' +
+        '<div class="auth-logo">🦷 Cybèle<strong>Gestion</strong></div>' +
+        '<p class="auth-sub">Accès réservé au personnel du cabinet.</p>' +
+        '<div class="auth-field"><label>Identifiant</label>' +
+          '<input type="email" id="auth-email" autocomplete="username" placeholder="prénom@cybele-dent.fr"></div>' +
+        '<div class="auth-field"><label>Mot de passe</label>' +
+          '<input type="password" id="auth-pwd" autocomplete="current-password" placeholder="••••••••"></div>' +
+        '<button class="btn btn-primary auth-btn" id="auth-signin">Se connecter →</button>' +
+        '<p class="auth-err" id="auth-err" hidden></p>' +
+        '<button class="auth-link" id="auth-forgot">Mot de passe oublié ?</button>' +
+      '</div>';
+    document.body.appendChild(gate);
+
+    const emailEl = gate.querySelector("#auth-email");
+    const pwdEl = gate.querySelector("#auth-pwd");
+    const errEl = gate.querySelector("#auth-err");
+    const btn = gate.querySelector("#auth-signin");
+    const showErr = (m, ok) => { errEl.textContent = m; errEl.hidden = false; errEl.style.color = ok ? "var(--ok)" : ""; };
+
+    const doSignIn = () => {
+      const email = emailEl.value.trim(), pwd = pwdEl.value;
+      if (!email || !pwd) { showErr("Renseignez votre identifiant et votre mot de passe."); return; }
+      errEl.hidden = true; btn.disabled = true; btn.textContent = "Connexion…";
+      window.CybeleAuth.signIn(email, pwd).catch((e) => {
+        showErr(window.CybeleAuth.frError(e));
+        btn.disabled = false; btn.textContent = "Se connecter →";
+        pwdEl.value = ""; pwdEl.focus();
+      });
+    };
+    btn.onclick = doSignIn;
+    pwdEl.addEventListener("keydown", (e) => { if (e.key === "Enter") doSignIn(); });
+    emailEl.addEventListener("keydown", (e) => { if (e.key === "Enter") pwdEl.focus(); });
+
+    gate.querySelector("#auth-forgot").onclick = () => {
+      const email = emailEl.value.trim();
+      if (!email) { showErr("Saisissez d'abord votre identifiant, puis cliquez sur « Mot de passe oublié »."); return; }
+      window.CybeleAuth.sendReset(email)
+        .then(() => showErr("Si un compte existe, un email de réinitialisation a été envoyé.", true))
+        .catch((e) => showErr(window.CybeleAuth.frError(e)));
+    };
+
+    const logoutBtn = document.getElementById("btn-logout");
+    if (logoutBtn) logoutBtn.onclick = () => {
+      if (confirm("Se déconnecter de CybèleGestion ?")) window.CybeleAuth.signOut().then(() => location.reload());
+    };
+
+    window.CybeleAuth.onChange((user) => {
+      if (user) {
+        gate.classList.add("hidden");
+        if (logoutBtn) { logoutBtn.hidden = false; logoutBtn.title = "Déconnexion (" + (user.email || "") + ")"; }
+      } else {
+        gate.classList.remove("hidden");
+        btn.disabled = false; btn.textContent = "Se connecter →";
+        if (logoutBtn) logoutBtn.hidden = true;
+        setTimeout(() => { try { emailEl.focus(); } catch (e) {} }, 60);
+      }
+    });
+  })();
+
   /* ---- petit toast partagé ---- */
   let t;
   function flash(msg) {

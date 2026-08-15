@@ -944,6 +944,8 @@
   /* ---- Lancement ---- */
   async function init() {
     app.innerHTML = '<div style="text-align:center;padding:80px 20px;color:var(--muted);font-size:1.1rem">⏳ Chargement…</div>';
+    // Attendre la connexion (sécurité) avant tout accès aux données cloud
+    if (window.CybeleAuth) { try { await window.CybeleAuth.whenReady(); } catch (e) {} }
     const local = loadLocal();
     if (window.CybeleDB) {
       try {

@@ -59,6 +59,8 @@
 
 .pl-grid { border: 1px solid var(--line); border-radius: var(--radius); overflow: hidden; background: #fff; box-shadow: var(--shadow); }
 .pl-row { display: grid; grid-template-columns: 190px repeat(7, 1fr); border-bottom: 1px solid var(--line); }
+.pl-grid.d5 .pl-row { grid-template-columns: 190px repeat(5, 1fr); }
+.pl-grid.d7 .pl-row { grid-template-columns: 190px repeat(7, 1fr); }
 .pl-row:last-child { border-bottom: none; }
 .pl-head { background: var(--bg); position: sticky; top: 0; }
 .pl-name { display: flex; align-items: center; gap: 9px; padding: 10px 12px; border-right: 1px solid var(--line); min-width: 0; }
@@ -68,6 +70,30 @@
 .pl-dayhead span { color: var(--muted); font-weight: 400; font-size: .72rem; }
 .pl-dayhead.today { color: var(--coral); }
 .pl-dayhead.today span { color: var(--coral); }
+/* Jours fériés / vacances scolaires (Zone A) */
+.pl-dayhead.pl-ferie { background: #fdecea; color: #c0392b; }
+.pl-dayhead.pl-ferie span { color: #c0392b; }
+.pl-dayhead.pl-vacances { background: #fff5e0; color: #b9770e; }
+.pl-dayhead.pl-vacances span { color: #b9770e; }
+.pl-daymeta { display: block; font-size: .62rem; line-height: 1.2; margin-top: 2px; max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.pl-daymeta.ferie { color: #c0392b; font-weight: 600; }
+.pl-daymeta.vac { color: #b9770e; font-weight: 600; }
+.pl-daymeta.ferm { color: #5a5f6e; font-weight: 600; }
+/* En-tête d'un jour de fermeture du cabinet */
+.pl-dayhead.pl-fermeture { background: #eef0f4; color: #5a5f6e; }
+.pl-dayhead.pl-fermeture span { color: #5a5f6e; }
+/* teinte légère de la colonne concernée */
+.pl-cell.pl-col-ferie { background-image: linear-gradient(rgba(192,57,43,.05), rgba(192,57,43,.05)); }
+.pl-cell.pl-col-vac { background-image: linear-gradient(rgba(185,119,14,.05), rgba(185,119,14,.05)); }
+/* Case d'un jour férié : cabinet fermé */
+.pl-cell.pl-ferie-cell { background: repeating-linear-gradient(45deg, #fdecea, #fdecea 7px, #fbe2df 7px, #fbe2df 14px); color: #c0392b; cursor: default; }
+.pl-cell.pl-ferie-cell .pl-type { color: #c0392b; }
+.pl-cell.pl-ferie-cell .pl-hours { color: #c0392b; opacity: .8; }
+.pl-cell.pl-ferie-cell:hover { background: repeating-linear-gradient(45deg, #fbe2df, #fbe2df 7px, #f8d5d1 7px, #f8d5d1 14px); }
+/* Fermeture du cabinet */
+.pl-cell.pl-ferm-closed { background: repeating-linear-gradient(45deg, #eef0f4, #eef0f4 7px, #e6e8ee 7px, #e6e8ee 14px); color: #5a5f6e; cursor: default; }
+.pl-cell.pl-ferm-closed .pl-type, .pl-cell.pl-ferm-closed .pl-hours { color: #5a5f6e; }
+.pl-cell.pl-ferm-conge { cursor: default; }
 
 .pl-cell { padding: 8px 6px; border-right: 1px solid var(--line); font-size: .78rem; min-height: 56px; display: flex; flex-direction: column; gap: 3px; justify-content: center; align-items: center; text-align: center; cursor: pointer; }
 .pl-cell:last-child { border-right: none; }
@@ -120,12 +146,52 @@
 .plain-card.off { opacity: .6; }
 
 /* =========================================================
+   ÉDITEUR DE CRÉNEAUX (modale planning)
+   ========================================================= */
+.creneau-row { display: flex; align-items: center; gap: 8px; margin-bottom: 8px; }
+.creneau-row input[type="time"] { flex: 1; padding: 10px 11px; border: 1px solid var(--line); border-radius: 10px; }
+.creneau-row input[type="time"]:focus { outline: none; border-color: var(--coral); }
+.cr-sep { color: var(--muted); }
+.cr-del { border: none; background: var(--danger-bg); color: var(--danger); width: 38px; height: 38px; border-radius: 10px; flex-shrink: 0; }
+.cr-del:hover { background: #f9dada; }
+
+/* Cases à cocher (paramètres) */
+.chk-line { display: flex; align-items: center; gap: 9px; font-size: .92rem; cursor: pointer; }
+.chk-line input { width: 18px; height: 18px; accent-color: var(--coral); }
+.jours-chk { display: flex; gap: 6px; flex-wrap: wrap; }
+.chk-inline { display: inline-flex; align-items: center; gap: 5px; background: var(--bg); border: 1px solid var(--line); border-radius: 8px; padding: 6px 10px; font-size: .85rem; cursor: pointer; }
+.chk-inline input { accent-color: var(--coral); }
+
+/* Titre visible seulement à l'impression */
+.print-title { display: none; }
+
+/* =========================================================
+   IMPRESSION DU PLANNING
+   ========================================================= */
+@media print {
+  @page { size: A4 landscape; margin: 10mm; }
+  body { background: #fff !important; }
+  /* on masque tout sauf le planning */
+  .app-header, .session-bar, .p-subnav, .pl-toolbar, .pl-tip, .toast,
+  #modal-root, [data-module-panel="equipements"] { display: none !important; }
+  .print-title { display: block !important; text-align: center; font-family: "Poppins", sans-serif; font-weight: 600; font-size: 1.15rem; margin-bottom: 12px; color: #000; }
+  .app-main { padding: 0 !important; max-width: none !important; }
+  .pl-grid { box-shadow: none !important; border: 1px solid #999 !important; overflow: visible !important; }
+  .pl-row { break-inside: avoid; }
+  .pl-cell, .pl-name, .pl-dayhead { border-color: #bbb !important; }
+  .pl-empty { color: transparent !important; }
+  /* forcer l'impression des couleurs de fond */
+  * { -webkit-print-color-adjust: exact !important; print-color-adjust: exact !important; }
+}
+
+/* =========================================================
    RESPONSIVE
    ========================================================= */
 @media (max-width: 760px) {
   .p-stats { grid-template-columns: repeat(2, 1fr); }
   .p-cols { grid-template-columns: 1fr; }
   .pl-grid { overflow-x: auto; }
-  .pl-row { grid-template-columns: 140px repeat(7, minmax(74px, 1fr)); min-width: 660px; }
+  .pl-grid.d7 .pl-row { grid-template-columns: 140px repeat(7, minmax(74px, 1fr)); min-width: 660px; }
+  .pl-grid.d5 .pl-row { grid-template-columns: 130px repeat(5, minmax(84px, 1fr)); min-width: 540px; }
   .badge-clock { font-size: 2.6rem; }
 }
