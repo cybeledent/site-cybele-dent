@@ -17,13 +17,18 @@ const TYPES = {
   ".webp": "image/webp",
   ".png": "image/png",
   ".xml": "application/xml",
+  ".webmanifest": "application/manifest+json; charset=utf-8",
+  ".ico": "image/x-icon",
   ".txt": "text/plain; charset=utf-8",
 };
 
 http.createServer((req, res) => {
   let urlPath = decodeURIComponent(req.url.split("?")[0]);
-  if (urlPath === "/") urlPath = "/index.html";
-  const filePath = path.join(ROOT, urlPath);
+  if (urlPath.endsWith("/")) urlPath += "index.html";
+  let filePath = path.join(ROOT, urlPath);
+  try {
+    if (fs.statSync(filePath).isDirectory()) filePath = path.join(filePath, "index.html");
+  } catch (e) { /* fichier inexistant : géré par readFile */ }
   if (!filePath.startsWith(ROOT)) { res.writeHead(403); return res.end("Forbidden"); }
   fs.readFile(filePath, (err, data) => {
     if (err) { res.writeHead(404); return res.end("Not found"); }

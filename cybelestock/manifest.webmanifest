@@ -1,0 +1,14 @@
+{
+  "name": "CybèleStock",
+  "short_name": "CybèleStock",
+  "description": "Gestion du stock du cabinet dentaire Cybèle Dent",
+  "start_url": "./index.html",
+  "scope": "./",
+  "display": "standalone",
+  "background_color": "#f4f8f7",
+  "theme_color": "#10947a",
+  "icons": [
+    { "src": "appicon.png?v=1", "sizes": "512x512", "type": "image/png", "purpose": "any" },
+    { "src": "appicon.png?v=1", "sizes": "512x512", "type": "image/png", "purpose": "maskable" }
+  ]
+}
