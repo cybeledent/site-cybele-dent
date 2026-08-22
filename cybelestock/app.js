@@ -1610,6 +1610,13 @@
       state = local || seed();
     }
     state = normalize(state);
+    // Migration : si l'état chargé est encore l'ancien état d'essai
+    // (vide, ou un seul produit « exemple »), on installe le vrai
+    // catalogue des commandes et on le réenregistre (local + cloud).
+    if (state.produits.length <= 1 && state.produits.every(p => String(p.name || "").toLowerCase().includes("exemple"))) {
+      state = normalize(seed());
+      save();
+    }
     render();
   }
   init();
