@@ -747,6 +747,21 @@
           <button class="btn btn-primary" id="pp-save">Enregistrer</button>
           <button class="btn btn-danger" id="pp-del" style="margin-left:auto">🗑 Supprimer le produit</button>
         </div>
+      </div>
+      <div class="card">
+        <h4>Fusionner dans un autre produit</h4>
+        <p class="lot-sub" style="margin-bottom:10px">Transfère toutes les références (avec leurs codes scannés)
+        et tout le stock de « ${esc(p.name)} » vers le produit choisi, puis supprime « ${esc(p.name)} ».
+        Utile pour regrouper des variantes sous un produit générique (ex. « Gants taille S »).
+        Les réglages (stock idéal, seuil…) du produit de destination sont conservés.</p>
+        <div class="toolbar">
+          <select id="pp-merge" class="grow" style="padding:9px 11px;border:1px solid var(--line);border-radius:10px">
+            <option value="">— choisir le produit de destination —</option>
+            ${state.produits.filter(x => x.id !== p.id).sort((a, b) => a.name.localeCompare(b.name, "fr")).map(x =>
+              `<option value="${x.id}">${esc(x.name)}</option>`).join("")}
+          </select>
+          <button class="btn" id="pp-merge-btn">⇄ Fusionner</button>
+        </div>
       </div>`;
   }
 
@@ -769,6 +784,18 @@
       state.produits = state.produits.filter(x => x.id !== p.id);
       delete state.commandes[p.id];
       save(); switchView("stock"); toast("Produit supprimé.");
+    };
+    document.getElementById("pp-merge-btn").onclick = () => {
+      const t = produit(document.getElementById("pp-merge").value);
+      if (!t) { toast("Choisissez d'abord le produit de destination."); return; }
+      if (!confirm(`Fusionner « ${p.name} » dans « ${t.name} » ?\n\nRéférences, codes scannés et stock sont transférés ; les réglages de « ${t.name} » sont conservés.`)) return;
+      t.references.push(...p.references);
+      t.lots.push(...p.lots);
+      if (state.commandes[p.id] && !state.commandes[t.id]) state.commandes[t.id] = state.commandes[p.id];
+      delete state.commandes[p.id];
+      state.produits = state.produits.filter(x => x.id !== p.id);
+      save(); switchView("fiche", { produitId: t.id, ficheTab: "refs" });
+      toast(`Fusionné dans « ${t.name} » (stock : ${stockTotal(t)}).`);
     };
   }
 
@@ -1147,8 +1174,12 @@
           <input id="nr-ref" value="${r ? esc(r.ref) : ""}" placeholder="ex : 258-9665"></div>
         <div class="field"><label>Prix indicatif (€)</label>
           <input id="nr-prix" value="${r ? esc(r.prix || "") : ""}" placeholder="facultatif"></div>
-        <div class="field full"><label>Désignation chez le fournisseur</label>
-          <input id="nr-desig" value="${r ? esc(r.designation || "") : ""}" placeholder="facultatif"></div>
+        <div class="field full"><label>Désignation (nom affiché)</label>
+          <input id="nr-desig" value="${r ? esc(r.designation || "") : ""}" placeholder="facultatif — corrigez ici un nom bizarre issu d'un scan"></div>
+        ${r ? `<div class="field full"><label>Rattachée au produit</label>
+          <select id="nr-prod">${state.produits.slice().sort((a, b) => a.name.localeCompare(b.name, "fr")).map(x =>
+            `<option value="${x.id}" ${x.id === p.id ? "selected" : ""}>${esc(x.name)}</option>`).join("")}</select>
+          <div class="field-hint">Changez de produit pour déplacer cette référence — ses codes scannés et ses lots en stock suivent.</div></div>` : ""}
         <div class="field full"><label>Lien vers la page produit</label>
           <input id="nr-url" type="url" value="${r ? esc(r.url || "") : ""}" placeholder="https://…">
           <div class="field-hint">Ce lien apparaîtra dans la liste de courses pour commander en 1 clic.</div></div>
@@ -1174,8 +1205,28 @@
         url: document.getElementById("nr-url").value.trim(),
         note: document.getElementById("nr-note").value.trim(),
       };
-      if (r) Object.assign(r, data);
-      else p.references.push(Object.assign({ id: uid(), gtins: [] }, data));
+      if (r) {
+        Object.assign(r, data);
+        // Déplacement éventuel vers un autre produit (codes + lots liés suivent)
+        const prodSel = document.getElementById("nr-prod");
+        const targetId = prodSel ? prodSel.value : p.id;
+        if (targetId !== p.id) {
+          const t = produit(targetId);
+          if (t) {
+            p.references = p.references.filter(x => x.id !== r.id);
+            t.references.push(r);
+            const moved = p.lots.filter(l => l.refId === r.id);
+            p.lots = p.lots.filter(l => l.refId !== r.id);
+            t.lots.push(...moved);
+            save(); closeModal();
+            switchView("fiche", { produitId: t.id, ficheTab: "refs" });
+            toast(`Référence déplacée vers « ${t.name} »${moved.length ? " (avec " + moved.reduce((s, l) => s + l.qty, 0) + " en stock)" : ""}.`);
+            return;
+          }
+        }
+      } else {
+        p.references.push(Object.assign({ id: uid(), gtins: [] }, data));
+      }
       save(); closeModal(); render();
     };
   }
