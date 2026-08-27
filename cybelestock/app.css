@@ -242,6 +242,26 @@ input, select, textarea { font-family: inherit; font-size: 1rem; }
 }
 .link-btn:hover { border-color: var(--accent); background: var(--accent-light); }
 
+.cave-chip {
+  background: #f3ead9; color: #8a6d2f; font-weight: 600;
+  padding: 1px 8px; border-radius: 999px;
+}
+
+/* Liste de choix du produit (fenêtre « Code inconnu ») */
+.as-list {
+  max-height: 240px; overflow-y: auto;
+  border: 1px solid var(--line); border-radius: 10px; margin-top: 8px;
+}
+.as-item {
+  display: block; width: 100%; text-align: left;
+  padding: 9px 12px; border: none; border-bottom: 1px solid var(--line);
+  background: var(--card); font-size: .92rem; font-weight: 600; color: var(--ink);
+}
+.as-item:last-child { border-bottom: none; }
+.as-item:hover { background: var(--accent-light); }
+.as-item.sel { background: var(--accent-light); box-shadow: inset 3px 0 0 var(--accent); }
+.as-cat { color: var(--muted); font-size: .76rem; font-weight: 400; }
+
 /* =========================================================
    SCANNER
    ========================================================= */

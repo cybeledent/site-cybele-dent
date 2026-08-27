@@ -246,6 +246,7 @@
       p.seuilMini = num(p.seuilMini);
       p.alertePeremption = !!p.alertePeremption;
       p.delaiAlerteMois = num(p.delaiAlerteMois) || 3;
+      p.enCave = !!p.enCave;
       p.references = Array.isArray(p.references) ? p.references : [];
       p.references.forEach(r => { r.gtins = Array.isArray(r.gtins) ? r.gtins : []; });
       p.lots = Array.isArray(p.lots) ? p.lots : [];
@@ -545,6 +546,7 @@
           <div class="prod-name">${esc(p.name)}</div>
           <div class="prod-meta">
             <span>idéal ${p.stockIdeal || "—"} · seuil ${p.seuilMini || "0"}</span>
+            ${p.enCave ? '<span class="cave-chip">🏠 aussi à la cave</span>' : ""}
             ${p.references.length ? `<span>${p.references.length} réf.</span>` : ""}
             ${past ? `<span style="color:var(--danger);font-weight:600">${past} lot(s) périmé(s)</span>` : ""}
             ${soon ? `<span style="color:var(--warn);font-weight:600">${soon} bientôt périmé(s)</span>` : ""}
@@ -608,7 +610,8 @@
           <h2>${esc(p.name)}</h2>
           <div class="prod-meta">${esc((categorie(p.categorieId) || {}).name || "Sans catégorie")} ·
             <span class="stock-pill ${stockClass(p)}" style="padding:2px 10px">${t} <small>${esc(p.unite)}${t > 1 ? "s" : ""}</small></span>
-            idéal ${p.stockIdeal || "—"} · seuil ${p.seuilMini || "0"}</div>
+            idéal ${p.stockIdeal || "—"} · seuil ${p.seuilMini || "0"}
+            ${p.enCave ? ' <span class="cave-chip">🏠 aussi à la cave</span>' : ""}</div>
         </div>
       </div>
       <div class="fiche-tabs">
@@ -740,6 +743,10 @@
           </div>
           <div class="field"><label>Alerte … mois avant</label>
             <input id="pp-delai" type="number" min="1" max="24" value="${p.delaiAlerteMois}"></div>
+          <div class="field full">
+            <div class="check-line"><input type="checkbox" id="pp-cave" ${p.enCave ? "checked" : ""}>
+              <span>🏠 Une partie du stock est rangée <strong>à la cave</strong></span></div>
+          </div>
           <div class="field full"><label>Note</label>
             <textarea id="pp-note">${esc(p.note || "")}</textarea></div>
         </div>
@@ -776,6 +783,7 @@
       p.seuilMini = num(document.getElementById("pp-seuil").value);
       p.alertePeremption = document.getElementById("pp-alerte").checked;
       p.delaiAlerteMois = num(document.getElementById("pp-delai").value) || 3;
+      p.enCave = document.getElementById("pp-cave").checked;
       p.note = document.getElementById("pp-note").value.trim();
       save(); render(); toast("Produit enregistré.");
     };
@@ -1044,49 +1052,120 @@
      MODALE : CODE INCONNU → ASSOCIER À UN PRODUIT
      ========================================================= */
   function openAssociateModal(parsed) {
-    const prods = state.produits.slice().sort((a, b) => a.name.localeCompare(b.name, "fr"));
     openModal("Code inconnu", `
       <div class="scan-result-prod">
         <div class="p-name">📷 Premier scan de ce produit</div>
         <div class="p-sub">code ${esc(parsed.gtin)}${parsed.peremption ? " · péremption " + fmtDate(parsed.peremption) : ""}${parsed.lot ? " · lot " + esc(parsed.lot) : ""}</div>
       </div>
-      <p style="font-size:.9rem;color:var(--muted);margin-bottom:10px">
-        Associez ce code à un produit : les prochains scans seront reconnus automatiquement.</p>
-      <div class="field full"><label>Produit</label>
-        <select id="as-prod">
-          <option value="">— choisir un produit —</option>
-          ${prods.map(p => `<option value="${p.id}">${esc(p.name)}</option>`).join("")}
-        </select></div>
-      <div class="field full" style="margin-top:8px"><label>Référence</label>
-        <select id="as-ref" disabled><option value="">— choisir d'abord le produit —</option></select>
-        <div class="field-hint">Le code sera mémorisé sur cette référence.</div></div>`,
-      `<button class="btn" data-cancel style="flex:1;justify-content:center">Ignorer</button>
-       <button class="btn btn-primary" data-ok style="flex:2;justify-content:center" disabled>Associer</button>`);
+      <div id="as-choose">
+        <div class="field full"><label>À quel produit correspond-il ?</label>
+          <input id="as-search" placeholder="🔍 Tapez quelques lettres pour filtrer…" autocomplete="off"></div>
+        <div id="as-list" class="as-list"></div>
+        <div class="field full" id="as-ref-wrap" style="margin-top:10px" hidden><label>Référence</label>
+          <select id="as-ref"></select>
+          <div class="field-hint">Le code sera mémorisé sur cette référence.</div></div>
+      </div>
+      <div id="as-new" hidden>
+        <div class="form-grid">
+          <div class="field full"><label>Nom du nouveau produit</label>
+            <input id="asn-name" placeholder="ex : Gants taille S"></div>
+          <div class="field full"><label>Catégorie</label>
+            <select id="asn-cat">${state.categories.map(c => `<option value="${c.id}">${esc(c.name)}</option>`).join("")}</select></div>
+        </div>
+        <p class="field-hint" style="margin-top:8px">Le produit sera créé et le code associé — pensez ensuite à régler
+        son stock idéal et son seuil dans sa fiche (⚙️ Réglages).</p>
+      </div>`,
+      `<button class="btn" data-cancel style="justify-content:center">Ignorer</button>
+       <button class="btn" data-new style="flex:1;justify-content:center">＋ Nouveau produit</button>
+       <button class="btn btn-primary" data-ok style="flex:1;justify-content:center" disabled>Associer</button>`);
 
-    const prodSel = document.getElementById("as-prod");
+    const searchEl = document.getElementById("as-search");
+    const listEl = document.getElementById("as-list");
+    const refWrap = document.getElementById("as-ref-wrap");
     const refSel = document.getElementById("as-ref");
+    const chooseEl = document.getElementById("as-choose");
+    const newEl = document.getElementById("as-new");
     const okBtn = modalRoot.querySelector("[data-ok]");
-    prodSel.onchange = () => {
-      const p = produit(prodSel.value);
-      if (!p) { refSel.disabled = true; refSel.innerHTML = '<option value="">—</option>'; okBtn.disabled = true; return; }
-      refSel.disabled = false;
+    const newBtn = modalRoot.querySelector("[data-new]");
+    let selectedId = null;
+    let modeCreate = false;
+
+    function renderList() {
+      const q = searchEl.value.trim().toLowerCase();
+      let prods = state.produits.slice().sort((a, b) => a.name.localeCompare(b.name, "fr"));
+      if (q) prods = prods.filter(p => p.name.toLowerCase().includes(q) ||
+        ((categorie(p.categorieId) || {}).name || "").toLowerCase().includes(q) ||
+        p.references.some(r => (r.ref || "").toLowerCase().includes(q) || (r.designation || "").toLowerCase().includes(q)));
+      const shown = prods.slice(0, 50);
+      listEl.innerHTML = shown.map(p => {
+        const c = categorie(p.categorieId);
+        return `<button type="button" class="as-item ${p.id === selectedId ? "sel" : ""}" data-pick="${p.id}">
+          ${esc(p.name)}<div class="as-cat">${c ? esc(c.name) : ""} · stock ${stockTotal(p)}</div>
+        </button>`;
+      }).join("") || `<div class="as-cat" style="padding:12px">Aucun produit ne correspond — utilisez « ＋ Nouveau produit ».</div>`;
+      if (prods.length > 50) listEl.innerHTML += `<div class="as-cat" style="padding:8px 12px">… ${prods.length - 50} autres : affinez la recherche.</div>`;
+      listEl.querySelectorAll("[data-pick]").forEach(b => b.onclick = () => pick(b.dataset.pick));
+    }
+
+    function pick(pid) {
+      selectedId = pid;
+      const p = produit(pid);
+      listEl.querySelectorAll(".as-item").forEach(b => b.classList.toggle("sel", b.dataset.pick === pid));
       refSel.innerHTML = p.references.map(r => {
         const f = fournisseur(r.fournisseurId);
-        return `<option value="${r.id}">${f ? esc(f.name) : "?"}${r.ref ? " — " + esc(r.ref) : ""}</option>`;
+        return `<option value="${r.id}">${f ? esc(f.name) : "?"}${r.ref ? " — " + esc(r.ref) : ""}${r.designation ? " — " + esc(r.designation) : ""}</option>`;
       }).join("") + `<option value="__new__">＋ Nouvelle référence…</option>`;
+      refWrap.hidden = false;
       okBtn.disabled = false;
+    }
+
+    searchEl.oninput = renderList;
+    renderList();
+    setTimeout(() => { try { searchEl.focus(); } catch (e) {} }, 60);
+
+    newBtn.onclick = () => {
+      modeCreate = !modeCreate;
+      chooseEl.hidden = modeCreate;
+      newEl.hidden = !modeCreate;
+      newBtn.textContent = modeCreate ? "← Produit existant" : "＋ Nouveau produit";
+      okBtn.textContent = modeCreate ? "Créer et associer" : "Associer";
+      if (modeCreate) {
+        const nameEl = document.getElementById("asn-name");
+        if (!nameEl.value) nameEl.value = searchEl.value.trim();
+        okBtn.disabled = false;
+        setTimeout(() => { try { nameEl.focus(); } catch (e) {} }, 60);
+      } else {
+        okBtn.disabled = !selectedId;
+      }
     };
+
     modalRoot.querySelector("[data-cancel]").onclick = closeModal;
     okBtn.onclick = () => {
-      const p = produit(prodSel.value); if (!p) return;
-      let refId = refSel.value;
-      if (refId === "__new__" || !refId) {
+      let p, refId;
+      if (modeCreate) {
+        const name = document.getElementById("asn-name").value.trim();
+        if (!name) { toast("Donnez un nom au produit."); return; }
+        p = {
+          id: uid(), categorieId: document.getElementById("asn-cat").value, name,
+          unite: "boîte", stockIdeal: 0, seuilMini: 0,
+          alertePeremption: false, delaiAlerteMois: 3, enCave: false, note: "",
+          references: [], lots: [],
+        };
+        state.produits.push(p);
         const r = { id: uid(), fournisseurId: "", ref: "", designation: "", url: "", prix: "", note: "", gtins: [parsed.gtin] };
         p.references.push(r); refId = r.id;
-        toast("Référence créée — complétez-la dans la fiche produit.");
+        toast("Produit créé — réglez son stock idéal dans sa fiche quand vous aurez un moment.");
       } else {
-        const r = reference(p, refId);
-        if (r && !r.gtins.some(g => normGtin(g) === normGtin(parsed.gtin))) r.gtins.push(parsed.gtin);
+        p = produit(selectedId); if (!p) return;
+        refId = refSel.value;
+        if (refId === "__new__" || !refId) {
+          const r = { id: uid(), fournisseurId: "", ref: "", designation: "", url: "", prix: "", note: "", gtins: [parsed.gtin] };
+          p.references.push(r); refId = r.id;
+          toast("Référence créée — complétez-la dans la fiche produit.");
+        } else {
+          const r = reference(p, refId);
+          if (r && !r.gtins.some(g => normGtin(g) === normGtin(parsed.gtin))) r.gtins.push(parsed.gtin);
+        }
       }
       save();
       closeModal();
