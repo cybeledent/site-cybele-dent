@@ -16,3 +16,16 @@
   RewriteCond %{THE_REQUEST} \s/index\.html[\s?] [NC]
   RewriteRule ^index\.html$ / [R=301,L]
 </IfModule>
+
+# ==========================================================
+# Cache : les pages HTML sont revérifiées auprès du serveur à
+# chaque visite → les mises à jour des applis (CybèleStock,
+# CybèleGestion…) arrivent immédiatement, sans rechargement forcé.
+# Les css/js/images restent en cache normalement : leurs adresses
+# sont versionnées (?v=) et changent à chaque mise à jour.
+# ==========================================================
+<IfModule mod_headers.c>
+  <FilesMatch "\.(html|webmanifest)$">
+    Header set Cache-Control "no-cache, max-age=0, must-revalidate"
+  </FilesMatch>
+</IfModule>
