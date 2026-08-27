@@ -23,7 +23,7 @@
      ========================================================= */
   let state = null;
   let view = { name: "stock", produitId: null, ficheTab: "stock", search: "" };
-  const closedCats = new Set();
+  const openCats = new Set(); // catégories dépliées (fermées par défaut)
 
   function uid() { return Date.now().toString(36) + Math.random().toString(36).slice(2, 7); }
 
@@ -469,10 +469,12 @@
      ========================================================= */
   function renderStock() {
     const q = view.search.trim().toLowerCase();
+    const caveOnly = !!view.cave;
     let html = `
       <div class="toolbar">
         <div class="grow"><input class="search-input" id="stock-search" type="search"
              placeholder="🔍 Rechercher un produit…" value="${esc(view.search)}"></div>
+        <button class="btn ${caveOnly ? "filter-on" : ""}" id="btn-cave-filter" title="N'afficher que les produits rangés (aussi) à la cave">🏠 Cave</button>
         <button class="btn btn-primary" id="btn-add-prod">＋ Produit</button>
         <button class="btn" id="btn-add-cat">＋ Catégorie</button>
       </div>`;
@@ -481,16 +483,18 @@
     const sansCat = state.produits.filter(p => !categorie(p.categorieId));
     if (sansCat.length) cats.push({ id: "__none__", name: "Sans catégorie" });
 
-    let anyShown = false;
+    const filtre = q || caveOnly; // en mode filtré : catégories vides masquées, le reste déplié
+    let totalShown = 0;
     cats.forEach(c => {
       let prods = c.id === "__none__" ? sansCat : state.produits.filter(p => p.categorieId === c.id);
+      if (caveOnly) prods = prods.filter(p => p.enCave);
       if (q) prods = prods.filter(p => p.name.toLowerCase().includes(q) ||
         p.references.some(r => (r.ref || "").toLowerCase().includes(q) || (r.designation || "").toLowerCase().includes(q)));
-      if (!prods.length && (q || c.id === "__none__")) return;
-      anyShown = anyShown || prods.length > 0 || !q;
+      if (!prods.length && (filtre || c.id === "__none__")) return;
+      totalShown += prods.length;
       prods.sort((a, b) => a.name.localeCompare(b.name, "fr"));
       const alerte = prods.some(p => stockTotal(p) <= p.seuilMini);
-      const closed = closedCats.has(c.id) && !q;
+      const closed = !openCats.has(c.id) && !filtre;
       html += `
         <section class="cat-block ${closed ? "closed" : ""}" data-cat="${c.id}">
           <button class="cat-head" data-toggle-cat="${c.id}">
@@ -507,7 +511,10 @@
 
     if (!state.produits.length) {
       html += `<div class="empty-note">Aucun produit pour l'instant.<br>Cliquez sur <strong>＋ Produit</strong> pour commencer.</div>`;
-    } else if (q && !anyShown) {
+    } else if (caveOnly && totalShown === 0) {
+      html += `<div class="empty-note">Aucun produit n'est marqué « à la cave »${q ? " avec cette recherche" : ""}.<br>
+        Cochez « 🏠 Une partie du stock est rangée à la cave » dans la fiche d'un produit (⚙️ Réglages).</div>`;
+    } else if (q && totalShown === 0) {
       html += `<div class="empty-note">Aucun produit ne correspond à « ${esc(view.search)} ».</div>`;
     }
 
@@ -515,11 +522,12 @@
 
     const search = document.getElementById("stock-search");
     search.oninput = () => { view.search = search.value; renderStockDebounced(); };
+    document.getElementById("btn-cave-filter").onclick = () => { view.cave = !view.cave; renderStock(); };
     document.getElementById("btn-add-prod").onclick = () => openProduitModal(null);
     document.getElementById("btn-add-cat").onclick = () => openCategorieModal(null);
     app.querySelectorAll("[data-toggle-cat]").forEach(b => b.onclick = () => {
       const id = b.dataset.toggleCat;
-      if (closedCats.has(id)) closedCats.delete(id); else closedCats.add(id);
+      if (openCats.has(id)) openCats.delete(id); else openCats.add(id);
       b.closest(".cat-block").classList.toggle("closed");
     });
     bindProdRows();
