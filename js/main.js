@@ -1,46 +1,6 @@
 /* CYBÈLE DENT — interactions */
 document.addEventListener("DOMContentLoaded", function () {
 
-  /* =========================================================
-     ENCART D'OUVERTURE (PROVISOIRE)
-     Pour le retirer une fois le cabinet ouvert :
-     passez la ligne ci-dessous à  false
-     ========================================================= */
-  var ANNONCE_ACTIVE = true;
-
-  if (ANNONCE_ACTIVE && !sessionStorage.getItem("annonceFermee")) {
-    var ov = document.createElement("div");
-    ov.className = "annonce-modal";
-    ov.innerHTML =
-      '<div class="annonce-backdrop"></div>' +
-      '<div class="annonce-box" role="dialog" aria-modal="true" aria-label="Ouverture du cabinet">' +
-        '<button class="annonce-close" type="button" aria-label="Fermer">&times;</button>' +
-        '<img class="annonce-logo" src="assets/logo.svg" alt="Cybèle Dent">' +
-        '<span class="annonce-badge">Ouverture prochaine</span>' +
-        '<h2>Le cabinet ouvre bientôt&nbsp;!</h2>' +
-        '<p>Le cabinet dentaire des <strong>Dr Céline Filipputti</strong> et <strong>Dr Laura Agosto</strong> ouvrira ses portes le <strong>31 août</strong>.</p>' +
-        '<p>La <strong>prise de rendez-vous en ligne est déjà possible</strong> dès maintenant.</p>' +
-        '<a class="btn btn-accent annonce-rdv" href="https://www.doctolib.fr/cabinet-dentaire/vienne/cybele-dent" target="_blank" rel="noopener">📅 Prendre rendez-vous</a>' +
-        '<button class="btn btn-primary annonce-ok" type="button">Découvrir le cabinet</button>' +
-      '</div>';
-    document.body.appendChild(ov);
-    document.body.classList.add("modal-open");
-
-    var fermerAnnonce = function () {
-      ov.remove();
-      document.body.classList.remove("modal-open");
-      sessionStorage.setItem("annonceFermee", "1");
-      document.removeEventListener("keydown", onEsc);
-    };
-    var onEsc = function (e) { if (e.key === "Escape") fermerAnnonce(); };
-
-    ov.querySelector(".annonce-close").addEventListener("click", fermerAnnonce);
-    ov.querySelector(".annonce-ok").addEventListener("click", fermerAnnonce);
-    ov.querySelector(".annonce-rdv").addEventListener("click", fermerAnnonce);
-    ov.querySelector(".annonce-backdrop").addEventListener("click", fermerAnnonce);
-    document.addEventListener("keydown", onEsc);
-  }
-
   /* ---- Menu mobile ---- */
   const toggle = document.querySelector(".nav-toggle");
   const links  = document.querySelector(".nav-links");
