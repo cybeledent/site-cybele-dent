@@ -1981,7 +1981,9 @@
       <div id="cm-lines"></div>
       <button class="btn btn-sm" id="cm-add-line" style="margin-top:8px">＋ Ajouter un article</button>
       <div class="field full" style="margin-top:12px"><label>Note</label><input id="cm-note" value="${esc(c.note || "")}" placeholder="facultatif"></div>
-      ${draft && draft.mailSujet ? `<div class="field-hint" style="margin-top:8px">✉ ${esc(draft.mailSujet)}</div>` : ""}`,
+      ${draft && draft.mailSujet ? `<div class="field-hint" style="margin-top:8px">✉ ${esc(draft.mailSujet)}</div>` : ""}
+      ${draft && draft.texteLu ? `<details style="margin-top:10px"><summary class="field-hint" style="cursor:pointer">Texte lu dans le mail (pour vérification)</summary>
+        <textarea readonly style="width:100%;min-height:140px;margin-top:6px;font-size:.78rem;font-family:monospace;border:1px solid var(--line);border-radius:10px;padding:8px">${esc(draft.texteLu)}</textarea></details>` : ""}`,
       `<button class="btn" data-cancel style="flex:1;justify-content:center">Annuler</button>
        <button class="btn btn-primary" data-ok style="flex:2;justify-content:center">${existing ? "Enregistrer" : "✔ Intégrer la commande"}</button>`);
 
@@ -2055,6 +2057,7 @@
       if (!data.fournisseurId && !data.fournisseurNom) { toast("Indiquez le fournisseur."); return; }
       if (!data.lignes.length) { toast("Ajoutez au moins un article."); return; }
       Object.assign(c, data);
+      delete c.texteLu; delete c.mailFrom;
       c.statut = statutCommande(c);
       if (!existing) {
         state.commandesSuivi.push(c);
@@ -2151,7 +2154,7 @@
 
     /* ---- Date : « passée le … », « du … », « Le 25 sept. 2026 », sinon date du mail ---- */
     const anneeMail = meta.date && !isNaN(new Date(meta.date)) ? new Date(meta.date).getFullYear() : new Date().getFullYear();
-    const dm = /(?:date\s*(?:de\s*(?:la\s*)?commande|d'achat)?|temps\s*de\s*commande|pay[ée]e?\s*(?:le|sur)|command[ée]e?\s*le|pass[ée]e\s*le|\bdu|^\s*le)[\s|:\-]*(?:(?:lundi|mardi|mercredi|jeudi|vendredi|samedi|dimanche)\s+)?(\d{1,2}(?:[\/.\-]\d{1,2}[\/.\-]\d{4}|(?:er)?\s+[a-zéû]+\.?(?:\s+\d{4})?))/im.exec(t);
+    const dm = /(?:date\s*(?:de\s*(?:la\s*)?commande|d'achat)?|temps\s*de\s*commande|pay[ée]e?\s*(?:le|sur)|command[ée]e?\s*le|pass[ée]e\s*le|\bdu|^\s*le)[\s|:\-]*(?:(?:lundi|mardi|mercredi|jeudi|vendredi|samedi|dimanche|lun|mar|mer|jeu|ven|sam|dim)\.?\s+)?(\d{1,2}(?:[\/.\-]\d{1,2}[\/.\-]\d{4}|(?:er)?\s+[a-zéû]+\.?(?:\s+\d{4})?))/im.exec(t);
     draft.date = (dm && parseDateFr(dm[1], anneeMail)) || (meta.date ? localIso(new Date(meta.date)) : null) || todayIso();
 
     /* ---- Montants ---- */
@@ -2354,6 +2357,7 @@
       const txt = document.getElementById("cm-paste").value;
       if (!txt.trim()) { toast("Collez d'abord le texte du mail."); return; }
       const draft = parseCommandeTexte(txt, {});
+      draft.texteLu = txt.slice(0, 8000);
       closeModal();
       openCommandeModal(null, draft);
       if (!draft.lignes.length) toast("Aucun article reconnu automatiquement : ajoutez-les à la main.");
@@ -2408,18 +2412,30 @@
       return new TextDecoder("utf-8").decode(bytes);
     } catch (e) { return ""; }
   }
-  function gmailBody(payload) {
+  // Corps du mail : HTML de préférence (les tableaux gardent leurs cellules « | »).
+  // Les parties dont le contenu n'est pas inclus (mail transféré en pièce jointe,
+  // gros mails) sont récupérées par un second appel.
+  async function gmailBody(payload, msgId, token) {
     let plain = "", html = "";
+    const pending = [];
     (function walk(p) {
       if (!p) return;
       const mt = p.mimeType || "";
-      if (p.body && p.body.data) {
-        if (mt === "text/plain" && !plain) plain = b64urlDecode(p.body.data);
-        else if (mt === "text/html" && !html) html = b64urlDecode(p.body.data);
+      const texte = mt === "text/plain" || mt === "text/html";
+      if (texte && p.body && p.body.data) {
+        if (mt === "text/plain") plain += (plain ? "\n" : "") + b64urlDecode(p.body.data);
+        else html += b64urlDecode(p.body.data);
+      } else if (texte && p.body && p.body.attachmentId) {
+        pending.push({ mt, id: p.body.attachmentId });
       }
       (p.parts || []).forEach(walk);
     })(payload);
-    // Le HTML garde la structure des tableaux (cellules « | ») : plus fiable pour les lignes
+    for (const a of pending.slice(0, 6)) {
+      try {
+        const r = await gmailApi("messages/" + msgId + "/attachments/" + a.id, token);
+        if (r && r.data) { if (a.mt === "text/plain") plain += "\n" + b64urlDecode(r.data); else html += b64urlDecode(r.data); }
+      } catch (e) { /* pièce jointe illisible : on continue */ }
+    }
     return html ? htmlToText(html) : plain;
   }
   function gmailHeader(payload, name) {
@@ -2446,9 +2462,10 @@
       for (const id of nouveaux) {
         const msg = await gmailApi("messages/" + id + "?format=full", token);
         const sujet = gmailHeader(msg.payload, "Subject"), from = gmailHeader(msg.payload, "From"), date = gmailHeader(msg.payload, "Date");
-        const text = gmailBody(msg.payload);
+        const text = await gmailBody(msg.payload, id, token);
         if (!ressembleCommande(text, sujet)) { state.mailsIgnores.push(id); continue; }
         const d = parseCommandeTexte(text, { mailId: id, sujet, from, date });
+        d.texteLu = String(text || "").slice(0, 8000);
         // Même n° qu'une commande déjà suivie (avis d'expédition, relance…) : on ignore
         if (d.numero && state.commandesSuivi.some(c => c.numero && c.numero.toLowerCase() === d.numero.toLowerCase())) { state.mailsIgnores.push(id); continue; }
         if (d.numero && drafts.some(x => x.numero && x.numero.toLowerCase() === d.numero.toLowerCase())) { state.mailsIgnores.push(id); continue; }
