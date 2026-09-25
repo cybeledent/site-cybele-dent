@@ -24,6 +24,8 @@
   let state = null;
   let view = { name: "stock", produitId: null, ficheTab: "stock", search: "" };
   const openCats = new Set(); // catégories dépliées (fermées par défaut)
+  let cmdTab = "encours";       // sous-onglet de la vue Commandes
+  let receptionCtx = null;      // { commandeId } pendant une réception par scan
 
   function uid() { return Date.now().toString(36) + Math.random().toString(36).slice(2, 7); }
 
@@ -240,6 +242,35 @@
     s.produits = Array.isArray(s.produits) ? s.produits : [];
     s.commandes = (s.commandes && typeof s.commandes === "object") ? s.commandes : {};
     s.coursesManuelles = Array.isArray(s.coursesManuelles) ? s.coursesManuelles : [];
+    // Suivi des commandes (v2) — champs ajoutés sans toucher aux produits/lots
+    s.commandesSuivi = Array.isArray(s.commandesSuivi) ? s.commandesSuivi : [];
+    s.mailsIgnores = Array.isArray(s.mailsIgnores) ? s.mailsIgnores : [];
+    s.gmail = (s.gmail && typeof s.gmail === "object") ? s.gmail : {};
+    // ID client OAuth du cabinet (public par nature) : pré-rempli pour éviter la saisie
+    if (!s.gmail.clientId) s.gmail.clientId = GMAIL_CLIENT_ID_DEFAUT;
+    if (!s.gmail.compte) s.gmail.compte = "cybeledent@gmail.com";
+    s.commandesSuivi.forEach(c => {
+      c.id = c.id || uid();
+      c.numero = String(c.numero || "");
+      c.date = c.date || todayIso();
+      c.fournisseurId = c.fournisseurId || "";
+      c.fournisseurNom = c.fournisseurNom || "";
+      c.total = Number(c.total) > 0 ? Number(c.total) : 0;
+      c.fraisPort = Number(c.fraisPort) > 0 ? Number(c.fraisPort) : 0;
+      c.statut = ["attente", "partielle", "recue", "archivee"].includes(c.statut) ? c.statut : "attente";
+      c.lignes = Array.isArray(c.lignes) ? c.lignes : [];
+      c.lignes.forEach(l => {
+        l.id = l.id || uid();
+        l.designation = String(l.designation || "");
+        l.ref = String(l.ref || "");
+        l.produitId = l.produitId || null;
+        l.refId = l.refId || null;
+        l.qty = Math.max(1, Math.round(Number(l.qty) || 1));
+        l.prix = Number(l.prix) > 0 ? Number(l.prix) : 0;
+        l.recu = Math.max(0, Math.round(Number(l.recu) || 0));
+      });
+      if (c.statut !== "archivee") c.statut = statutCommande(c);
+    });
     s.produits.forEach(p => {
       p.unite = p.unite || "boîte";
       p.stockIdeal = num(p.stockIdeal);
@@ -442,13 +473,16 @@
     updateBadges();
     document.querySelectorAll(".nav-tab").forEach(t => {
       const target = t.dataset.nav;
-      t.classList.toggle("active", view.name === target || (view.name === "fiche" && target === "stock"));
+      t.classList.toggle("active", view.name === target || (view.name === "fiche" && target === "stock")
+        || (view.name === "commande" && target === "commandes"));
     });
     if (view.name === "stock") renderStock();
     else if (view.name === "fiche") renderFiche();
     else if (view.name === "scan") renderScan();
     else if (view.name === "courses") renderCourses();
     else if (view.name === "peremption") renderPeremption();
+    else if (view.name === "commandes") renderCommandes();
+    else if (view.name === "commande") renderCommandeDetail();
     else if (view.name === "reglages") renderReglages();
   }
 
@@ -462,6 +496,11 @@
     const bP = document.getElementById("badge-peremption");
     const nP = past.length + soon.length;
     bP.hidden = nP === 0; bP.textContent = nP;
+    const bK = document.getElementById("badge-commandes");
+    if (bK) {
+      const nK = state.commandesSuivi.filter(c => c.statut === "partielle" || c.statut === "recue").length;
+      bK.hidden = nK === 0; bK.textContent = nK;
+    }
   }
 
   /* =========================================================
@@ -824,12 +863,20 @@
   let lastScanText = "", lastScanTime = 0;
 
   function renderScan() {
+    const rc = receptionCtx ? commandeSuivi(receptionCtx.commandeId) : null;
+    if (!rc) receptionCtx = null;
+    if (rc) scanMode = "entree";
     app.innerHTML = `
       <div class="scan-wrap">
         <h2 class="view-title">📷 Scanner</h2>
         <p class="view-sub">Visez le petit carré <strong>Datamatrix</strong> (ou le code-barres) de la boîte.
         La péremption et le lot se remplissent tout seuls quand le code les contient.</p>
-        <div class="scan-mode">
+        ${rc ? `<div class="reception-banner">
+          <div><strong>📦 Réception de la commande ${esc(rc.numero || "sans n°")}</strong>
+            <div class="lot-sub">${esc(nomFournisseurCommande(rc))} · ${resteCommande(rc)} article${resteCommande(rc) > 1 ? "s" : ""} encore attendu${resteCommande(rc) > 1 ? "s" : ""}. Chaque scan valide une ligne.</div></div>
+          <button class="btn btn-sm" id="reception-stop">Terminer</button>
+        </div>` : ""}
+        <div class="scan-mode" ${rc ? "hidden" : ""}>
           <button id="mode-entree" class="entree ${scanMode === "entree" ? "active" : ""}">＋ Entrée en stock</button>
           <button id="mode-sortie" class="sortie ${scanMode === "sortie" ? "active" : ""}">− Sortie du stock</button>
         </div>
@@ -842,6 +889,8 @@
       </div>`;
     document.getElementById("mode-entree").onclick = () => { scanMode = "entree"; renderScan(); };
     document.getElementById("mode-sortie").onclick = () => { scanMode = "sortie"; renderScan(); };
+    const stopBtn = document.getElementById("reception-stop");
+    if (stopBtn) stopBtn.onclick = () => { const id = receptionCtx.commandeId; receptionCtx = null; switchView("commande", { commandeId: id }); };
     const manual = document.getElementById("scan-manual-input");
     const doManual = () => { const v = manual.value.trim(); if (v) { manual.value = ""; handleScan(v); } };
     manual.onkeydown = (e) => { if (e.key === "Enter") doManual(); };
@@ -920,6 +969,7 @@
     const match = findByGtin(parsed.gtin);
     if (match) {
       if (scanMode === "sortie") openSortieModal(match.p.id, { scanned: parsed, refId: match.r.id });
+      else if (receptionCtx) receptionScan(match.p.id, match.r.id, parsed);
       else openEntreeModal(match.p.id, { scanned: parsed, refId: match.r.id });
     } else {
       openAssociateModal(parsed);
@@ -975,6 +1025,7 @@
     openModal("＋ Entrée — " + esc(p.name), `
       ${scanned ? `<div class="scan-result-prod"><div class="p-name">📷 Code reconnu</div>
         <div class="p-sub">${scanned.peremption ? "péremption " + fmtDate(scanned.peremption) + " · " : ""}${scanned.lot ? "lot " + esc(scanned.lot) : ""}</div></div>` : ""}
+      ${opts.hint ? `<div class="scan-result-prod ${opts.hintWarn ? "hint-warn" : ""}"><div class="p-sub">${opts.hint}</div></div>` : ""}
       <div class="form-grid">
         <div class="field full"><label>Quantité (${esc(p.unite)}s)</label>${stepperHtml("en-qty", opts.qty || 1)}</div>
         <div class="field full"><label>Référence commandée</label>
@@ -1003,8 +1054,9 @@
       const same = p.lots.find(l => l.refId === refId && (l.peremption || null) === perempt && (l.lot || null) === lotNum);
       if (same) same.qty += qty;
       else p.lots.push({ id: uid(), refId, qty, peremption: perempt, lot: lotNum, entree: todayIso() });
-      save(); closeModal(); render();
-      toast(`＋${qty} ${p.name} (stock : ${stockTotal(p)})`);
+      save(); closeModal();
+      if (typeof opts.onDone === "function") { opts.onDone(qty); }
+      else { render(); toast(`＋${qty} ${p.name} (stock : ${stockTotal(p)})`); }
     };
   }
 
@@ -1178,6 +1230,7 @@
       save();
       closeModal();
       if (scanMode === "sortie") openSortieModal(p.id, { scanned: parsed, refId });
+      else if (receptionCtx) receptionScan(p.id, refId, parsed);
       else openEntreeModal(p.id, { scanned: parsed, refId });
     };
   }
@@ -1506,6 +1559,925 @@
   }
 
   /* =========================================================
+     SUIVI DES COMMANDES
+     state.commandesSuivi : [{ id, numero, date, fournisseurId,
+       fournisseurNom, total, fraisPort, statut, source, mailId,
+       mailSujet, note, creeLe, archiveeLe,
+       lignes: [{ id, designation, ref, produitId, refId, qty, prix, recu }] }]
+     Le stock (produits / lots) n'est modifié QUE par la fenêtre
+     « Entrée en stock » habituelle, ligne par ligne, à la réception.
+     ========================================================= */
+  function commandeSuivi(id) { return state.commandesSuivi.find(c => c.id === id) || null; }
+
+  function statutCommande(c) {
+    if (c.statut === "archivee") return "archivee";
+    if (!c.lignes.length) return "attente";
+    const complete = c.lignes.every(l => l.recu >= l.qty);
+    if (complete) return "recue";
+    return c.lignes.some(l => l.recu > 0) ? "partielle" : "attente";
+  }
+  function resteCommande(c) { return c.lignes.reduce((t, l) => t + Math.max(0, l.qty - l.recu), 0); }
+  function reliquats(c) { return c.lignes.filter(l => l.recu < l.qty); }
+  function nomFournisseurCommande(c) {
+    const f = c.fournisseurId ? fournisseur(c.fournisseurId) : null;
+    return f ? f.name : (c.fournisseurNom || "Fournisseur ?");
+  }
+  function montantCommande(c) {
+    if (c.total > 0) return c.total;
+    return c.lignes.reduce((t, l) => t + l.qty * l.prix, 0) + (c.fraisPort || 0);
+  }
+  function parsePrix(v) {
+    if (typeof v === "number") return isFinite(v) && v > 0 ? v : 0;
+    const s = String(v || "").replace(/\s/g, "").replace("€", "").replace(",", ".");
+    const n = parseFloat(s);
+    return isFinite(n) && n > 0 ? Math.round(n * 100) / 100 : 0;
+  }
+  function fmtEur(n) {
+    n = Number(n) || 0;
+    return n.toLocaleString("fr-FR", { minimumFractionDigits: 2, maximumFractionDigits: 2 }) + " €";
+  }
+  const STATUT_LABEL = { attente: "En attente de livraison", partielle: "Partiellement reçue", recue: "Tout est arrivé", archivee: "Archivée" };
+  const STATUT_ICON = { attente: "🕒", partielle: "🟠", recue: "✅", archivee: "🗄" };
+
+  // Marque les produits de la commande « commandés » dans la liste de courses
+  function marquerCommandesCourses(c) {
+    c.lignes.forEach(l => {
+      if (l.produitId && produit(l.produitId) && !state.commandes[l.produitId]) state.commandes[l.produitId] = { date: c.date };
+    });
+  }
+
+  /* ---- Historique des prix (issu des commandes) ---- */
+  // Dernier prix connu pour une référence ou un produit (tri par date décroissante)
+  function lignesPrix() {
+    const out = [];
+    state.commandesSuivi.forEach(c => c.lignes.forEach(l => {
+      if (l.prix > 0 && l.produitId) out.push({ date: c.date, produitId: l.produitId, refId: l.refId, prix: l.prix, commande: c });
+    }));
+    out.sort((a, b) => (a.date < b.date ? 1 : a.date > b.date ? -1 : 0));
+    return out;
+  }
+  function prixUnitaire(p, lot, cache) {
+    const hist = cache || lignesPrix();
+    if (lot && lot.refId) {
+      const h = hist.find(x => x.refId === lot.refId);
+      if (h) return { prix: h.prix, src: "commande" };
+      const r = reference(p, lot.refId);
+      if (r && parsePrix(r.prix)) return { prix: parsePrix(r.prix), src: "indicatif" };
+    }
+    const hp = hist.find(x => x.produitId === p.id);
+    if (hp) return { prix: hp.prix, src: "commande" };
+    const r2 = p.references.find(r => parsePrix(r.prix));
+    if (r2) return { prix: parsePrix(r2.prix), src: "indicatif" };
+    return null;
+  }
+
+  /* =========================================================
+     VUE : COMMANDES (liste)
+     ========================================================= */
+  function renderCommandes() {
+    const enCours = state.commandesSuivi.filter(c => c.statut !== "archivee")
+      .sort((a, b) => (a.date < b.date ? 1 : -1));
+    const archivees = state.commandesSuivi.filter(c => c.statut === "archivee")
+      .sort((a, b) => ((a.archiveeLe || a.date) < (b.archiveeLe || b.date) ? 1 : -1));
+    const gmailOk = !!(state.gmail && state.gmail.clientId);
+
+    let html = `
+      <h2 class="view-title">🧾 Commandes</h2>
+      <p class="view-sub">Suivi des commandes fournisseurs : réception par scan, reliquats, dépenses et valeur du stock.</p>
+      <div class="fiche-tabs">
+        <button class="fiche-tab ${cmdTab === "encours" ? "active" : ""}" data-ctab="encours">📬 En cours (${enCours.length})</button>
+        <button class="fiche-tab ${cmdTab === "archivees" ? "active" : ""}" data-ctab="archivees">🗄 Archivées (${archivees.length})</button>
+        <button class="fiche-tab ${cmdTab === "finances" ? "active" : ""}" data-ctab="finances">📊 Dépenses & valeur</button>
+      </div>`;
+
+    if (cmdTab === "finances") {
+      html += renderFinances();
+    } else {
+      html += `
+        <div class="toolbar">
+          <button class="btn btn-primary btn-sm" id="cmd-new">＋ Nouvelle commande</button>
+          <button class="btn btn-sm" id="cmd-paste">✉️ Coller un mail de commande</button>
+          <button class="btn btn-sm" id="cmd-gmail" title="${gmailOk ? "Chercher les mails de commande dans la boîte Gmail" : "À configurer dans ⚙️ Réglages"}">📬 Vérifier mes mails${gmailOk ? "" : " (à configurer)"}</button>
+        </div>`;
+      const list = cmdTab === "encours" ? enCours : archivees;
+      if (!list.length) {
+        html += `<div class="empty-note">${cmdTab === "encours"
+          ? "Aucune commande en cours. Créez-en une, collez le mail de confirmation du fournisseur, ou lancez la vérification des mails."
+          : "Aucune commande archivée pour le moment."}</div>`;
+      }
+      // En cours : d'abord ce qui demande une action (reçues à archiver, partielles), puis en attente
+      const ordre = { recue: 0, partielle: 1, attente: 2, archivee: 3 };
+      list.slice().sort((a, b) => cmdTab === "encours" ? (ordre[a.statut] - ordre[b.statut]) || (a.date < b.date ? 1 : -1) : 0)
+        .forEach(c => { html += commandeCard(c); });
+    }
+
+    app.innerHTML = html;
+    app.querySelectorAll("[data-ctab]").forEach(b => b.onclick = () => { cmdTab = b.dataset.ctab; render(); });
+    const bNew = document.getElementById("cmd-new");
+    if (bNew) bNew.onclick = () => openCommandeModal(null);
+    const bPaste = document.getElementById("cmd-paste");
+    if (bPaste) bPaste.onclick = openCollerMailModal;
+    const bGmail = document.getElementById("cmd-gmail");
+    if (bGmail) bGmail.onclick = () => { if (gmailOk) gmailVerifier({ manuel: true }); else openGmailAideModal(); };
+    app.querySelectorAll("[data-open-cmd]").forEach(el => el.onclick = () => switchView("commande", { commandeId: el.dataset.openCmd }));
+    bindFinances();
+  }
+
+  function commandeCard(c) {
+    const reste = resteCommande(c), total = c.lignes.reduce((t, l) => t + l.qty, 0);
+    const rel = reliquats(c);
+    return `
+      <div class="cmd-card cmd-${c.statut}" data-open-cmd="${c.id}">
+        <div class="cmd-top">
+          <span class="cmd-icon">${STATUT_ICON[c.statut]}</span>
+          <div class="grow">
+            <div class="cmd-title">${esc(nomFournisseurCommande(c))} <span class="cmd-num">${c.numero ? "n° " + esc(c.numero) : "sans n°"}</span></div>
+            <div class="lot-sub">${fmtDate(c.date)} · ${c.lignes.length} ligne${c.lignes.length > 1 ? "s" : ""} · ${fmtEur(montantCommande(c))}${c.source === "mail" ? " · ✉️" : ""}</div>
+          </div>
+          <span class="cmd-statut">${STATUT_LABEL[c.statut]}</span>
+        </div>
+        ${c.statut === "partielle" ? `<div class="cmd-reliquat">Reliquat : ${reste}/${total} article${reste > 1 ? "s" : ""} — ${rel.slice(0, 3).map(l => esc(l.designation || nomLigne(l))).join(", ")}${rel.length > 3 ? "…" : ""}</div>` : ""}
+        ${c.statut === "recue" ? `<div class="cmd-reliquat ok">Tout est arrivé — pensez à archiver.</div>` : ""}
+      </div>`;
+  }
+  function nomLigne(l) {
+    if (l.designation) return l.designation;
+    const p = l.produitId ? produit(l.produitId) : null;
+    return p ? p.name : (l.ref ? "réf " + l.ref : "Article");
+  }
+
+  /* =========================================================
+     VUE : DÉTAIL D'UNE COMMANDE (réception)
+     ========================================================= */
+  function renderCommandeDetail() {
+    const c = commandeSuivi(view.commandeId);
+    if (!c) { switchView("commandes"); return; }
+    const rel = reliquats(c);
+    const totalQty = c.lignes.reduce((t, l) => t + l.qty, 0);
+    const recuQty = c.lignes.reduce((t, l) => t + Math.min(l.recu, l.qty), 0);
+
+    const ligneHtml = (l, isRel) => {
+      const p = l.produitId ? produit(l.produitId) : null;
+      const reste = Math.max(0, l.qty - l.recu);
+      const done = reste === 0;
+      return `
+        <div class="cmd-line ${done ? "done" : ""} ${isRel ? "rel" : ""}">
+          <div class="cmd-line-qty">${l.recu}/${l.qty}</div>
+          <div class="grow">
+            <div class="cmd-line-name">${esc(nomLigne(l))}</div>
+            <div class="lot-sub">${l.ref ? "réf " + esc(l.ref) + " · " : ""}${l.prix ? fmtEur(l.prix) + " l'unité" : "prix inconnu"}
+              ${p ? ` · <span data-goto="${p.id}" style="cursor:pointer;text-decoration:underline">${esc(p.name)}</span> (stock ${stockTotal(p)})` : ` · <span class="cmd-unlinked">non lié à un produit</span>`}</div>
+          </div>
+          ${c.statut === "archivee" ? "" : `
+          <div class="qty-btns">
+            ${!done ? `<button class="btn btn-sm btn-primary" data-recu="${l.id}" title="Valider la réception de cette ligne">✔ Reçu</button>` : `<button class="btn btn-sm" data-unrecu="${l.id}" title="Annuler la réception (le stock n'est pas modifié)">↩</button>`}
+          </div>`}
+        </div>`;
+    };
+
+    let html = `
+      <div class="fiche-head">
+        <button class="fiche-back" id="cmd-back" title="Retour">←</button>
+        <div style="flex:1">
+          <h2>${esc(nomFournisseurCommande(c))} ${c.numero ? `<span class="cmd-num">n° ${esc(c.numero)}</span>` : ""}</h2>
+          <div class="prod-meta">${fmtDate(c.date)} · ${fmtEur(montantCommande(c))}${c.fraisPort ? " (dont port " + fmtEur(c.fraisPort) + ")" : ""} ·
+            <span class="cmd-statut cmd-statut-${c.statut}">${STATUT_ICON[c.statut]} ${STATUT_LABEL[c.statut]}</span></div>
+        </div>
+      </div>
+      ${c.statut !== "archivee" ? `
+      <div class="toolbar">
+        <button class="btn btn-primary" id="cmd-scan" ${rel.length ? "" : "disabled"}>📷 Scanner la réception</button>
+        <button class="btn" id="cmd-edit">✎ Modifier</button>
+        ${c.statut === "recue" ? `<button class="btn" id="cmd-archive">🗄 Archiver</button>` : ""}
+        <button class="btn btn-danger btn-sm" id="cmd-del" style="margin-left:auto">🗑</button>
+      </div>
+      <div class="cmd-progress"><div style="width:${totalQty ? Math.round(recuQty / totalQty * 100) : 0}%"></div></div>
+      <div class="lot-sub" style="margin:-6px 0 12px">${recuQty} / ${totalQty} article${totalQty > 1 ? "s" : ""} reçu${recuQty > 1 ? "s" : ""}</div>` : `
+      <div class="toolbar">
+        <button class="btn" id="cmd-unarchive">↩ Sortir des archives</button>
+        <button class="btn btn-danger btn-sm" id="cmd-del" style="margin-left:auto">🗑</button>
+      </div>`}`;
+
+    if (c.statut === "partielle" && rel.length) {
+      html += `<div class="card card-warn"><h4>🟠 Reliquat — encore attendu (${rel.length})</h4>
+        ${rel.map(l => ligneHtml(l, true)).join("")}</div>`;
+    }
+    html += `<div class="card"><h4>Articles commandés (${c.lignes.length})</h4>
+      ${c.lignes.length ? c.lignes.map(l => ligneHtml(l, false)).join("") : '<div class="lot-sub" style="padding:8px 0">Aucune ligne — cliquez sur « ✎ Modifier » pour en ajouter.</div>'}
+    </div>`;
+    if (c.note || c.mailSujet) html += `<div class="card"><h4>Note</h4><div class="lot-sub" style="white-space:pre-wrap">${c.mailSujet ? "✉️ " + esc(c.mailSujet) + "\n" : ""}${esc(c.note || "")}</div></div>`;
+
+    app.innerHTML = html;
+    document.getElementById("cmd-back").onclick = () => switchView("commandes");
+    app.querySelectorAll("[data-goto]").forEach(el => el.onclick = () => switchView("fiche", { produitId: el.dataset.goto }));
+    const q = (id) => document.getElementById(id);
+    if (q("cmd-scan")) q("cmd-scan").onclick = () => { receptionCtx = { commandeId: c.id }; switchView("scan"); };
+    if (q("cmd-edit")) q("cmd-edit").onclick = () => openCommandeModal(c);
+    if (q("cmd-archive")) q("cmd-archive").onclick = () => archiverCommande(c);
+    if (q("cmd-unarchive")) q("cmd-unarchive").onclick = () => { c.statut = "attente"; c.statut = statutCommande(c); delete c.archiveeLe; save(); render(); };
+    if (q("cmd-del")) q("cmd-del").onclick = () => {
+      if (!confirm("Supprimer cette commande du suivi ?\n(Le stock déjà entré n'est pas modifié.)")) return;
+      state.commandesSuivi = state.commandesSuivi.filter(x => x.id !== c.id);
+      save(); switchView("commandes"); toast("Commande supprimée.");
+    };
+    app.querySelectorAll("[data-recu]").forEach(b => b.onclick = () => recevoirLigne(c, b.dataset.recu, null));
+    app.querySelectorAll("[data-unrecu]").forEach(b => b.onclick = () => {
+      const l = c.lignes.find(x => x.id === b.dataset.unrecu); if (!l) return;
+      l.recu = 0; c.statut = statutCommande(c); save(); render();
+    });
+  }
+
+  // Réception d'une ligne : si liée à un produit → fenêtre d'entrée en stock
+  // habituelle (quantité pré-remplie = reste attendu) ; sinon simple validation.
+  function recevoirLigne(c, ligneId, scanned) {
+    const l = c.lignes.find(x => x.id === ligneId); if (!l) return;
+    const reste = Math.max(0, l.qty - l.recu);
+    const p = l.produitId ? produit(l.produitId) : null;
+    const apres = (qty) => {
+      l.recu = Math.min(l.qty, l.recu + qty);
+      c.statut = statutCommande(c);
+      save();
+      if (c.statut === "recue") proposerArchivage(c);
+      else { render(); toast(`✔ ${nomLigne(l)} — ${l.recu}/${l.qty} reçu${l.recu > 1 ? "s" : ""}`); }
+    };
+    if (p) {
+      const refOk = l.refId && reference(p, l.refId) ? l.refId : (p.references[0] ? p.references[0].id : null);
+      openEntreeModal(p.id, {
+        scanned, refId: refOk, qty: reste || 1,
+        hint: `🧾 Commande ${esc(c.numero || "")} — ${reste} attendu${reste > 1 ? "s" : ""} sur cette ligne. La quantité saisie entre en stock et valide la réception.`,
+        onDone: apres,
+      });
+    } else {
+      apres(reste);
+    }
+  }
+
+  // Scan pendant une réception : retrouve la ligne correspondante
+  function receptionScan(pid, refId, parsed) {
+    const c = receptionCtx ? commandeSuivi(receptionCtx.commandeId) : null;
+    if (!c) { receptionCtx = null; openEntreeModal(pid, { scanned: parsed, refId }); return; }
+    const cand = c.lignes.filter(l => l.produitId === pid && l.recu < l.qty);
+    const l = cand.find(x => x.refId === refId) || cand[0];
+    if (l) { recevoirLigne(c, l.id, parsed); return; }
+    const p = produit(pid);
+    const deja = c.lignes.some(x => x.produitId === pid);
+    openEntreeModal(pid, {
+      scanned: parsed, refId, hintWarn: true,
+      hint: deja ? `⚠ Cette ligne de la commande ${esc(c.numero || "")} est déjà entièrement reçue. L'entrée sera ajoutée au stock hors commande.`
+                 : `⚠ « ${esc(p ? p.name : "?")} » ne figure pas dans la commande ${esc(c.numero || "")}. L'entrée sera ajoutée au stock hors commande.`,
+      onDone: () => { render(); toast("Entrée hors commande ajoutée au stock."); },
+    });
+  }
+
+  function proposerArchivage(c) {
+    openModal("🎉 Tout est arrivé !", `
+      <p style="margin-bottom:10px">Tous les articles de la commande <strong>${esc(nomFournisseurCommande(c))}${c.numero ? " n° " + esc(c.numero) : ""}</strong> ont été reçus.</p>
+      <p class="lot-sub">On l'archive ? Elle restera consultable dans « Archivées » et comptera dans les dépenses.</p>`,
+      `<button class="btn" data-later style="flex:1;justify-content:center">Plus tard</button>
+       <button class="btn btn-primary" data-ok style="flex:2;justify-content:center">🗄 Archiver</button>`);
+    modalRoot.querySelector("[data-later]").onclick = () => { closeModal(); render(); };
+    modalRoot.querySelector("[data-ok]").onclick = () => { closeModal(); archiverCommande(c); };
+  }
+  function archiverCommande(c) {
+    c.statut = "archivee"; c.archiveeLe = todayIso();
+    receptionCtx = null;
+    save(); switchView("commandes"); toast("Commande archivée.");
+  }
+
+  /* =========================================================
+     MODALE : CRÉER / MODIFIER UNE COMMANDE
+     draft = commande existante (état) ou brouillon issu d'un mail
+     ========================================================= */
+  function openCommandeModal(existing, draft) {
+    const c = existing || Object.assign({
+      id: uid(), numero: "", date: todayIso(), fournisseurId: "", fournisseurNom: "", total: 0, fraisPort: 0,
+      statut: "attente", source: "manuel", mailId: null, mailSujet: "", note: "", creeLe: todayIso(), lignes: [],
+    }, draft || {});
+    // Copie de travail des lignes (on n'écrit dans l'état qu'à l'enregistrement)
+    let lignes = c.lignes.map(l => Object.assign({ id: uid(), designation: "", ref: "", produitId: null, refId: null, qty: 1, prix: 0, recu: 0 }, l));
+    if (!lignes.length) lignes.push({ id: uid(), designation: "", ref: "", produitId: null, refId: null, qty: 1, prix: 0, recu: 0 });
+    const prods = state.produits.slice().sort((a, b) => a.name.localeCompare(b.name, "fr"));
+
+    openModal(existing ? "✎ Commande" : (draft ? "✉️ Commande trouvée — vérifiez puis intégrez" : "＋ Nouvelle commande"), `
+      <div class="form-grid">
+        <div class="field"><label>Fournisseur</label>
+          <select id="cm-fourn">
+            <option value="">— choisir —</option>
+            ${state.fournisseurs.map(f => `<option value="${f.id}" ${c.fournisseurId === f.id ? "selected" : ""}>${esc(f.name)}</option>`).join("")}
+            <option value="__autre__" ${!c.fournisseurId && c.fournisseurNom ? "selected" : ""}>Autre…</option>
+          </select></div>
+        <div class="field" id="cm-fourn-nom-wrap" ${!c.fournisseurId && c.fournisseurNom ? "" : "hidden"}><label>Nom du fournisseur</label>
+          <input id="cm-fourn-nom" value="${esc(c.fournisseurNom || "")}"></div>
+        <div class="field"><label>N° de commande</label><input id="cm-num" value="${esc(c.numero)}" placeholder="ex : 5000031629"></div>
+        <div class="field"><label>Date</label><input id="cm-date" type="date" value="${esc(c.date)}"></div>
+        <div class="field"><label>Total TTC (€)</label><input id="cm-total" inputmode="decimal" value="${c.total ? String(c.total).replace(".", ",") : ""}" placeholder="calculé si vide"></div>
+        <div class="field"><label>Frais de port (€)</label><input id="cm-port" inputmode="decimal" value="${c.fraisPort ? String(c.fraisPort).replace(".", ",") : ""}"></div>
+      </div>
+      <div class="section-label" style="margin-top:14px">Articles</div>
+      ${draft ? '<div class="field-hint" style="margin:-4px 0 8px">Prix unitaires tels qu\'indiqués dans le mail (HT ou TTC selon le fournisseur). Vérifiez les quantités et le produit du stock associé à chaque ligne.</div>' : ""}
+      <div id="cm-lines"></div>
+      <button class="btn btn-sm" id="cm-add-line" style="margin-top:8px">＋ Ajouter un article</button>
+      <div class="field full" style="margin-top:12px"><label>Note</label><input id="cm-note" value="${esc(c.note || "")}" placeholder="facultatif"></div>
+      ${draft && draft.mailSujet ? `<div class="field-hint" style="margin-top:8px">✉️ ${esc(draft.mailSujet)}</div>` : ""}`,
+      `<button class="btn" data-cancel style="flex:1;justify-content:center">Annuler</button>
+       <button class="btn btn-primary" data-ok style="flex:2;justify-content:center">${existing ? "Enregistrer" : "✔ Intégrer la commande"}</button>`);
+
+    const fournSel = document.getElementById("cm-fourn");
+    fournSel.onchange = () => { document.getElementById("cm-fourn-nom-wrap").hidden = fournSel.value !== "__autre__"; };
+    const linesEl = document.getElementById("cm-lines");
+
+    function prodOptions(sel) {
+      return `<option value="">— produit du stock non lié —</option>` + prods.map(p =>
+        `<option value="${p.id}" ${p.id === sel ? "selected" : ""}>${esc(p.name)}</option>`).join("");
+    }
+    function renderLines() {
+      linesEl.innerHTML = lignes.map((l, i) => `
+        <div class="cm-line" data-i="${i}">
+          <div class="cm-line-row">
+            <input class="cm-desig" placeholder="Désignation" value="${esc(l.designation)}" title="Désignation">
+            <button type="button" class="btn btn-sm btn-danger cm-del" title="Retirer">✕</button>
+          </div>
+          <div class="cm-line-row">
+            <input class="cm-ref" placeholder="Réf." value="${esc(l.ref)}" style="flex:1.2">
+            <input class="cm-qty" type="number" min="1" inputmode="numeric" value="${l.qty}" title="Quantité" style="flex:.7">
+            <input class="cm-prix" inputmode="decimal" placeholder="€ unit." value="${l.prix ? String(l.prix).replace(".", ",") : ""}" title="Prix unitaire" style="flex:.9">
+          </div>
+          <div class="cm-line-row">
+            <select class="cm-prod" title="Produit du stock correspondant">${prodOptions(l.produitId)}</select>
+          </div>
+          ${l.produitId && !produit(l.produitId) ? "" : ""}
+        </div>`).join("");
+      linesEl.querySelectorAll(".cm-line").forEach(row => {
+        const i = Number(row.dataset.i), l = lignes[i];
+        row.querySelector(".cm-desig").oninput = (e) => { l.designation = e.target.value; };
+        row.querySelector(".cm-ref").oninput = (e) => { l.ref = e.target.value; };
+        row.querySelector(".cm-qty").oninput = (e) => { l.qty = Math.max(1, Math.round(Number(e.target.value) || 1)); };
+        row.querySelector(".cm-prix").oninput = (e) => { l.prix = parsePrix(e.target.value); };
+        row.querySelector(".cm-prod").onchange = (e) => {
+          l.produitId = e.target.value || null;
+          l.refId = null;
+          const p = l.produitId ? produit(l.produitId) : null;
+          if (p) {
+            // Référence du produit correspondant à la réf. saisie, sinon celle du fournisseur choisi
+            const fid = fournSel.value;
+            const r = p.references.find(x => l.ref && normRef(x.ref) === normRef(l.ref))
+                   || p.references.find(x => fid && x.fournisseurId === fid) || null;
+            if (r) l.refId = r.id;
+            if (!l.designation) { l.designation = r && r.designation ? r.designation : p.name; row.querySelector(".cm-desig").value = l.designation; }
+          }
+        };
+        row.querySelector(".cm-del").onclick = () => { lignes.splice(i, 1); renderLines(); };
+      });
+    }
+    renderLines();
+    document.getElementById("cm-add-line").onclick = () => { lignes.push({ id: uid(), designation: "", ref: "", produitId: null, refId: null, qty: 1, prix: 0, recu: 0 }); renderLines(); linesEl.lastElementChild.scrollIntoView({ block: "nearest" }); };
+
+    modalRoot.querySelector("[data-cancel]").onclick = closeModal;
+    modalRoot.querySelector("[data-ok]").onclick = () => {
+      const fv = fournSel.value;
+      const data = {
+        numero: document.getElementById("cm-num").value.trim(),
+        date: document.getElementById("cm-date").value || todayIso(),
+        fournisseurId: fv === "__autre__" ? "" : fv,
+        fournisseurNom: fv === "__autre__" ? document.getElementById("cm-fourn-nom").value.trim() : "",
+        total: parsePrix(document.getElementById("cm-total").value),
+        fraisPort: parsePrix(document.getElementById("cm-port").value),
+        note: document.getElementById("cm-note").value.trim(),
+        lignes: lignes.filter(l => l.designation || l.ref || l.produitId).map(l => {
+          if (l.produitId && !produit(l.produitId)) { l.produitId = null; l.refId = null; }
+          if (l.produitId && l.refId && !reference(produit(l.produitId), l.refId)) l.refId = null;
+          return l;
+        }),
+      };
+      if (!data.fournisseurId && !data.fournisseurNom) { toast("Indiquez le fournisseur."); return; }
+      if (!data.lignes.length) { toast("Ajoutez au moins un article."); return; }
+      Object.assign(c, data);
+      c.statut = statutCommande(c);
+      if (!existing) {
+        state.commandesSuivi.push(c);
+        marquerCommandesCourses(c);
+      }
+      save(); closeModal();
+      switchView("commande", { commandeId: c.id });
+      toast(existing ? "Commande enregistrée." : "Commande intégrée au suivi.");
+    };
+  }
+  const MOTS_GENERIQUES = new Set(["taille", "boite", "boites", "carton", "cartons", "sachet", "sachets", "paquet", "lot", "pour", "avec", "sans", "des", "les",
+    "une", "conditionnement", "vente", "couleur", "dimension", "unite", "unites", "pcs", "piece", "pieces", "flacon", "tube", "kit", "set", "type", "modele", "option", "ref", "reference"]);
+  function normRef(r) { return String(r || "").toUpperCase().replace(/[^A-Z0-9]/g, ""); }
+
+  /* =========================================================
+     ANALYSE D'UN MAIL / TEXTE DE COMMANDE → brouillon
+     Heuristiques volontairement prudentes : tout est relu et
+     corrigeable dans la fenêtre avant intégration.
+     ========================================================= */
+  function htmlToText(html) {
+    let s = String(html || "");
+    s = s.replace(/<(script|style|head)[\s\S]*?<\/\1>/gi, " ");
+    s = s.replace(/<!--[\s\S]*?-->/g, " ");
+    // Les retours à la ligne du code HTML ne comptent pas : seules les balises structurent le texte
+    s = s.replace(/\s+/g, " ");
+    s = s.replace(/<br\s*\/?>/gi, "\n").replace(/<\/(p|div|li|h\d|tr|table|thead|tbody)>/gi, "\n").replace(/<tr\b/gi, "\n<tr");
+    s = s.replace(/<\/t[dh]>/gi, " | ");
+    s = s.replace(/<[^>]+>/g, " ");
+    const t = document.createElement("textarea"); t.innerHTML = s; s = t.value;
+    return s.replace(/[ \t ]+/g, " ").replace(/ *\n */g, "\n").replace(/\n{2,}/g, "\n").trim();
+  }
+  function parseDateFr(s, anneeDefaut) {
+    let m = /(\d{1,2})[\/.\-](\d{1,2})[\/.\-](\d{4})/.exec(s);
+    if (m) return `${m[3]}-${m[2].padStart(2, "0")}-${m[1].padStart(2, "0")}`;
+    m = /(\d{4})-(\d{2})-(\d{2})/.exec(s);
+    if (m) return m[0];
+    const mois = ["jan", "fev", "mar", "avr", "mai", "juin", "juil", "aou", "sep", "oct", "nov", "dec"];
+    m = /(\d{1,2})(?:er)?\s+([a-zéûô]+)\.?(?:\s+(\d{4}))?/i.exec(s);
+    if (m) {
+      if (!m[3]) { if (!anneeDefaut) return null; m[3] = String(anneeDefaut); }
+      const mo = m[2].toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "").replace(/^fevr/, "fev").replace(/^juill/, "juil");
+      const i = mois.findIndex(x => mo.startsWith(x) && !(x === "juin" && mo.startsWith("juil")) && !(x === "mar" && mo.startsWith("mai")));
+      if (i >= 0) return `${m[3]}-${String(i + 1).padStart(2, "0")}-${m[1].padStart(2, "0")}`;
+    }
+    return null;
+  }
+  function devinerFournisseur(text, from) {
+    const hay = (text + " " + (from || "")).toLowerCase();
+    let best = null;
+    state.fournisseurs.forEach(f => {
+      const n = f.name.toLowerCase();
+      let dom = "";
+      try { dom = f.url ? new URL(f.url).hostname.replace(/^www\./, "") : ""; } catch (e) {}
+      if ((dom && hay.includes(dom)) || hay.includes(n)) {
+        const score = (dom && (from || "").toLowerCase().includes(dom)) ? 3 : hay.includes(n) ? 2 : 1;
+        if (!best || score > best.score) best = { f, score };
+      }
+    });
+    return best ? best.f : null;
+  }
+  // Lie une ligne à un produit du stock : réf. exacte, sinon mots de la désignation
+  function lierLigneProduit(l, fournisseurId) {
+    const nr = normRef(l.ref);
+    if (nr && nr.length >= 3) {
+      for (const p of state.produits) for (const r of p.references) {
+        if (normRef(r.ref) === nr) { l.produitId = p.id; l.refId = r.id; return; }
+      }
+    }
+    const tokens = (l.designation || "").toLowerCase().normalize("NFD").replace(/[̀-ͯ]/g, "")
+      .split(/[^a-z0-9]+/).filter(t => t.length >= 3 && !MOTS_GENERIQUES.has(t));
+    if (tokens.length < 2) return;
+    let best = null;
+    state.produits.forEach(p => {
+      const hay = (p.name + " " + p.references.map(r => r.designation || "").join(" ")).toLowerCase()
+        .normalize("NFD").replace(/[̀-ͯ]/g, "");
+      const score = tokens.filter(t => hay.includes(t)).length;
+      if (score >= 2 && (!best || score > best.score)) best = { p, score };
+    });
+    if (best && best.score >= Math.max(2, Math.ceil(tokens.length * 0.6))) {
+      l.produitId = best.p.id;
+      const r = best.p.references.find(x => fournisseurId && x.fournisseurId === fournisseurId) || null;
+      l.refId = r ? r.id : null;
+    }
+  }
+  function parseCommandeTexte(text, meta) {
+    meta = meta || {};
+    const t = String(text || "").replace(/ /g, " ");
+    const draft = { source: meta.mailId ? "mail" : "manuel", mailId: meta.mailId || null, mailSujet: meta.sujet || "", lignes: [] };
+
+    /* ---- N° de commande : le jeton doit contenir un chiffre ---- */
+    const numRe = /(?:n[°oº]\s*(?:de\s*)?commande|num[ée]ro\s*de\s*(?:la\s*)?commande|r[ée]f[ée]rence\s*(?:de\s*(?:la\s*)?)?commande|order\s*(?:number|n[°o]\.?|#)?|(?:votre\s*)?commande(?:\s*(?:num[ée]ro|n[°oº]\.?))?)[\s|:#\-]*#?\s*(?=[A-Z0-9\-\/_.]*\d)([A-Z0-9][A-Z0-9\-\/_.]{3,})/i;
+    let m = numRe.exec(t) || numRe.exec(meta.sujet || "");
+    if (m) draft.numero = m[1].replace(/[.,;:]+$/, "");
+
+    /* ---- Date : « passée le … », « du … », « Le 25 sept. 2026 », sinon date du mail ---- */
+    const anneeMail = meta.date && !isNaN(new Date(meta.date)) ? new Date(meta.date).getFullYear() : new Date().getFullYear();
+    const dm = /(?:date\s*(?:de\s*(?:la\s*)?commande)?|command[ée]e?\s*le|pass[ée]e\s*le|\bdu|^\s*le)[\s|:\-]*(?:(?:lundi|mardi|mercredi|jeudi|vendredi|samedi|dimanche)\s+)?(\d{1,2}(?:[\/.\-]\d{1,2}[\/.\-]\d{4}|(?:er)?\s+[a-zéû]+\.?(?:\s+\d{4})?))/im.exec(t);
+    draft.date = (dm && parseDateFr(dm[1], anneeMail)) || (meta.date ? localIso(new Date(meta.date)) : null) || todayIso();
+
+    /* ---- Montants ---- */
+    const MONEY = "(?:€\\s*)?(\\d{1,3}(?:[ .]\\d{3})+(?:[,.]\\d{2})|\\d+[,.]\\d{2})\\s*(?:€|eur\\b)?";
+    const toNum = (s) => parsePrix(String(s).replace(/[ .](?=\d{3}\b)/g, "").replace(",", "."));
+    const findTotal = (labels) => {
+      for (const lab of labels) {
+        const re = new RegExp("(?<![a-zé\\-])" + lab + "(?:[^\\d€\\n]{0,40}?|[^\\d€\\n]{0,40}?\\n\\s*\\|?\\s*)" + MONEY, "ig");
+        if (new RegExp("(?<![a-zé\\-])" + lab + "[^\\d€\\n]{0,40}?\\b(?:offert|gratuit)", "i").test(t)) return 0;
+        let last = null, mm; while ((mm = re.exec(t))) last = mm[1];
+        if (last !== null) return toNum(last);
+      }
+      return 0;
+    };
+    draft.total = findTotal(["total\\s*(?:à|a)\\s*payer", "montant\\s*total", "total\\s*de\\s*la\\s*commande", "total\\s*ttc", "total\\s*g[ée]n[ée]ral", "(?<!sous[ \\-]?)total(?!\\s*h\\.?t)"]);
+    draft.fraisPort = findTotal(["(?<!hors\\s{0,3})frais\\s*de\\s*port(?![^\\n]{0,10}\\])[^\\n]{0,40}?", "participation[^\\n]{0,60}?(?:port|exp[ée]dition|emballage)[^\\n]{0,20}?", "exp[ée]dition", "livraison", "shipping", "\\bport\\b"]);
+
+    /* ---- Fournisseur ---- */
+    const f = devinerFournisseur(t, meta.from);
+    if (f) draft.fournisseurId = f.id;
+    else if (meta.from) {
+      const nm = /^"?([^"<@]+?)"?\s*</.exec(meta.from);
+      const dom = /@(?:[a-z0-9-]+\.)*?([a-z0-9-]+)\.[a-z]{2,}/i.exec(meta.from);
+      draft.fournisseurNom = nm ? nm[1].trim() : (dom ? dom[1].charAt(0).toUpperCase() + dom[1].slice(1) : meta.from.trim());
+    }
+
+    /* ---- Articles : lecture bloc par bloc ----
+       Une « ligne d'article » = une ligne contenant un prix (ou une quantité
+       « × 2 » / « 2 unité(s) »). Les lignes de texte juste avant (nom du
+       produit, « Réf : … ») complètent la ligne. Les cellules de tableau
+       sont séparées par « | ». */
+    const moneyCell = new RegExp("^" + MONEY + "$", "i");
+    const moneyAny = new RegExp(MONEY, "ig");
+    const qtyCell = /^(\d{1,3})\s*(?:u|x|×|pcs?|pi[èe]ces?|unit[ée]s?|unit[ée]\(s\)|bo[iî]tes?|cartons?)?\s*(?:gratuite\(s\)|gratuits?|offerts?)?\s*(?:\([^)]*\))?$/i;
+    const qtySuffix = /\s+×\s*(\d{1,3})(?!\s*(?:ml|cl|mm|cm|m|g|kg|l)\b)(?=\s|$)|\s+x\s*(\d{1,3})\s*$/i;
+    const qtyPrefix = /^(\d{1,3})\s*(?:unit[ée]\(s\)|unit[ée]s?|u|pcs?|pi[èe]ces?)\b/i;
+    const refCell = /^(?=[A-Z0-9\-\/._]*\d)[A-Z0-9][A-Z0-9\-\/._]{2,}$/i;
+    const refLabel = /\[?\s*r[ée]f(?:[ée]rence)?\.?\s*:?\s*(?=[A-Z0-9\-\/._]*\d)([A-Z0-9][A-Z0-9\-\/._]{2,})/i;
+    const pctCell = /^\d{1,2}(?:[,.]\d+)?\s*%$/;
+    const stop = /(?<![a-z0-9])(sous[\s\-]?total|total|tva|t\.v\.a|taxes?|frais|port|exp[ée]dition|livraison|emballage|participation|remise|r[ée]duction|[ée]conomis[ée]|coupon|code\s*promo|montant|paiement|adresse|t[ée]l(?:[ée]phone)?|iban|siret|rpps|num[ée]ro\s*de\s*client)(?![a-z0-9])/i;
+    const header = /\b(produits?|articles?|d[ée]signation|description|r[ée]f[ée]rence|qt[ée]|quantit[ée]|prix|total)\b/ig;
+    const lines = t.split("\n").map(s => s.trim());
+    let pending = [];
+
+    const cleanCell = (s) => s.replace(/\s{2,}/g, " ").replace(/^[\s\-–:.,|]+|[\s\-–:.,|]+$/g, "").trim();
+    const isNoise = (s) => !s || s.length < 3 || /^\d+$/.test(s) || pctCell.test(s) || moneyCell.test(s) || stop.test(s) || /@|https?:\/\//i.test(s);
+
+    function pushItem(desig, ref, qty, prices, rawRef) {
+      desig = cleanCell(desig || "");
+      if (isNoise(desig)) return;
+      qty = Math.max(1, qty || 1);
+      let prix = 0;
+      if (prices.length) {
+        const last = prices[prices.length - 1];
+        const unit = prices.find(p => p !== last && Math.abs(p * qty - last) < 0.02);
+        prix = unit != null ? unit : Math.round(last / qty * 100) / 100;
+      }
+      if (!ref) { const im = /\b(?=[A-Z0-9\-]{5,}\b)(?=[A-Z0-9\-]*\d)(?=[A-Z0-9\-]*[A-Z])([A-Z]+\d+[A-Z0-9]*|\d+[A-Z]+[A-Z0-9]*)\b/.exec(desig); if (im) ref = im[1]; }
+      const l = { id: uid(), designation: desig.slice(0, 120), ref: cleanCell(ref || rawRef || "").split(/\s/)[0], produitId: null, refId: null, qty, prix, recu: 0 };
+      lierLigneProduit(l, draft.fournisseurId);
+      draft.lignes.push(l);
+    }
+
+    for (let i = 0; i < lines.length; i++) {
+      const s = lines[i];
+      if (!s || /^[|\s]*$/.test(s)) { pending = []; continue; }
+      if (/(?:^|[\s|(])-\s?\d+[,.]\d{2}/.test(s)) { pending = []; continue; } // remise (montant négatif)
+      const cells = s.split("|").map(c => c.trim()).filter(Boolean);
+      const hdrHits = (s.replace(moneyAny, "").match(header) || []).length;
+      if (hdrHits >= 2 && !moneyAny.test(s)) { moneyAny.lastIndex = 0; pending = []; continue; }
+      moneyAny.lastIndex = 0;
+
+      const prices = [], others = [];
+      let qty = 0, ref = "";
+      cells.forEach(c => {
+        if (moneyCell.test(c)) prices.push(toNum(c.replace(/[€]|eur\b/ig, "").trim()));
+        else if (pctCell.test(c)) return;
+        else if (qtyCell.test(c) && !qty) qty = Number(qtyCell.exec(c)[1]);
+        else if (refCell.test(c) && !/^\d{1,3}$/.test(c)) ref = c;
+        else others.push(c);
+      });
+      // Prix collés dans une cellule de texte (« … 2 x 5,95 € »)
+      if (!prices.length) {
+        others.forEach((c, k) => { let mm; const re = new RegExp(MONEY, "ig"); while ((mm = re.exec(c))) prices.push(toNum(mm[1])); if (prices.length) others[k] = c.replace(re, " "); });
+      }
+      // Quantité en suffixe « × 3 » ou en préfixe « 2 unité(s) »
+      others.forEach((c, k) => {
+        let mm = qtySuffix.exec(c);
+        if (mm && !qty) { qty = Number(mm[1] || mm[2]); others[k] = c.replace(qtySuffix, " "); return; }
+        mm = qtyPrefix.exec(c);
+        if (mm && !qty && !prices.length) { qty = Number(mm[1]); others[k] = ""; }
+      });
+      // Référence explicite « Réf : 123-456 » dans la ligne ou juste avant
+      const refM = refLabel.exec(s) || pending.map(p => refLabel.exec(p)).find(Boolean);
+      if (refM) ref = refM[1];
+      others.forEach((c, k) => { others[k] = cleanCell(c.replace(refLabel, " ")); });
+      const textCells = others.filter(c => c && !isNoise(c));
+      // Ligne de total / TVA / port sans quantité ni référence : on l'ignore
+      if (!qty && !ref && stop.test(others.join(" "))) { pending = []; continue; }
+
+      const isItem = prices.length > 0 || (qty > 0 && (textCells.length || pending.length));
+      if (!isItem) {
+        // Ligne de texte simple : candidate « nom de produit » pour la ligne suivante
+        if (/^\|/.test(s)) pending = []; // début d'une nouvelle ligne de tableau
+        if (!stop.test(s) && !/@|https?:\/\//i.test(s)) { pending.push(s.replace(/^\|\s*/, "")); if (pending.length > 3) pending.shift(); }
+        else pending = [];
+        continue;
+      }
+      // Prix seul sur la ligne suivante (« … × 1 » puis « €314,17 »)
+      if (!prices.length && qty > 0 && lines[i + 1] && moneyCell.test(cleanCell(lines[i + 1]))) {
+        prices.push(toNum(cleanCell(lines[i + 1]).replace(/[€]|eur\b/ig, "").trim())); i++;
+      }
+      // Ligne « total / port / tva » : on ignore
+      const rowText = textCells.join(" ");
+      if (!textCells.length && !pending.length) continue;
+      if (textCells.length && !pending.length && stop.test(rowText)) continue;
+      const namePending = pending.map(cleanCell).filter(p => p && !isNoise(p) && !refLabel.test(p) && !/^option\s*:/i.test(p));
+      let desig;
+      if (namePending.length) desig = namePending[namePending.length - 1];
+      else desig = textCells.sort((a, b) => b.length - a.length)[0];
+      if (desig && qty === 0) { const mm = qtyPrefix.exec(desig); if (mm) { qty = Number(mm[1]); desig = desig.replace(qtyPrefix, ""); } }
+      pushItem(desig, ref, qty, prices);
+      pending = [];
+    }
+
+    // Dédoublonnage (même désignation + même prix) et plafond
+    const seen = new Set();
+    draft.lignes = draft.lignes.filter(l => { const k = l.designation.toLowerCase() + "|" + l.prix; if (seen.has(k)) return false; seen.add(k); return true; }).slice(0, 80);
+    return draft;
+  }
+  function ressembleCommande(text, sujet) {
+    const hay = (String(sujet || "") + "\n" + String(text || "")).toLowerCase();
+    return /\b(commande|order|bon de commande|confirmation|facture|exp[ée]di[ée]e?|livraison)\b/.test(hay)
+      && (/(?:€\s*)?\d{1,4}[,.]\d{2}\s*(?:€|eur)/i.test(hay) || /\b\d{1,3}\s*unit[ée]/i.test(hay));
+  }
+
+  function openCollerMailModal() {
+    openModal("✉️ Coller un mail de commande", `
+      <p class="lot-sub" style="margin-bottom:8px">Ouvrez le mail de confirmation du fournisseur, sélectionnez tout (Ctrl+A), copiez (Ctrl+C) et collez ici.
+      Je repère le n° de commande, la date, le total et les articles — vous vérifiez tout avant d'intégrer.</p>
+      <div class="field full"><textarea id="cm-paste" style="min-height:180px" placeholder="Collez le texte du mail ici…"></textarea></div>`,
+      `<button class="btn" data-cancel style="flex:1;justify-content:center">Annuler</button>
+       <button class="btn btn-primary" data-ok style="flex:2;justify-content:center">Analyser →</button>`);
+    modalRoot.querySelector("[data-cancel]").onclick = closeModal;
+    modalRoot.querySelector("[data-ok]").onclick = () => {
+      const txt = document.getElementById("cm-paste").value;
+      if (!txt.trim()) { toast("Collez d'abord le texte du mail."); return; }
+      const draft = parseCommandeTexte(txt, {});
+      closeModal();
+      openCommandeModal(null, draft);
+      if (!draft.lignes.length) toast("Aucun article reconnu automatiquement : ajoutez-les à la main.");
+    };
+  }
+
+  /* =========================================================
+     PASSERELLE GMAIL (lecture seule, depuis le navigateur)
+     Nécessite un « ID client OAuth » Google (⚙️ Réglages).
+     ========================================================= */
+  const GMAIL_SCOPE = "https://www.googleapis.com/auth/gmail.readonly";
+  const GMAIL_CLIENT_ID_DEFAUT = "398491776725-2thppp5q7medqis72hsahop1745q6sci.apps.googleusercontent.com";
+  const GMAIL_QUERY_DEFAUT = 'newer_than:60d -in:spam -in:trash (commande OR "bon de commande" OR confirmation OR facture OR order OR expédiée OR expédition)';
+  let gmailToken = null; // { token, exp }
+
+  function gmailLoadGis() {
+    return new Promise((res, rej) => {
+      if (window.google && google.accounts && google.accounts.oauth2) return res();
+      const s = document.createElement("script");
+      s.src = "https://accounts.google.com/gsi/client"; s.async = true;
+      s.onload = () => res(); s.onerror = () => rej(new Error("gis"));
+      document.head.appendChild(s);
+    });
+  }
+  function gmailGetToken(interactive) {
+    if (gmailToken && gmailToken.exp > Date.now() + 30000) return Promise.resolve(gmailToken.token);
+    return gmailLoadGis().then(() => new Promise((res, rej) => {
+      const client = google.accounts.oauth2.initTokenClient({
+        client_id: state.gmail.clientId,
+        scope: GMAIL_SCOPE,
+        hint: state.gmail.compte || undefined,
+        callback: (resp) => {
+          if (resp && resp.access_token) {
+            gmailToken = { token: resp.access_token, exp: Date.now() + (Number(resp.expires_in) || 3600) * 1000 };
+            res(gmailToken.token);
+          } else rej(new Error((resp && resp.error) || "token"));
+        },
+        error_callback: (e) => rej(new Error((e && e.type) || "popup")),
+      });
+      client.requestAccessToken({ prompt: "" });
+    }));
+  }
+  async function gmailApi(path, token) {
+    const r = await fetch("https://gmail.googleapis.com/gmail/v1/users/me/" + path, { headers: { Authorization: "Bearer " + token } });
+    if (!r.ok) throw new Error("gmail " + r.status);
+    return r.json();
+  }
+  function b64urlDecode(s) {
+    try {
+      const bin = atob(String(s || "").replace(/-/g, "+").replace(/_/g, "/"));
+      const bytes = new Uint8Array(bin.length); for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
+      return new TextDecoder("utf-8").decode(bytes);
+    } catch (e) { return ""; }
+  }
+  function gmailBody(payload) {
+    let plain = "", html = "";
+    (function walk(p) {
+      if (!p) return;
+      const mt = p.mimeType || "";
+      if (p.body && p.body.data) {
+        if (mt === "text/plain" && !plain) plain = b64urlDecode(p.body.data);
+        else if (mt === "text/html" && !html) html = b64urlDecode(p.body.data);
+      }
+      (p.parts || []).forEach(walk);
+    })(payload);
+    // Le HTML garde la structure des tableaux (cellules « | ») : plus fiable pour les lignes
+    return html ? htmlToText(html) : plain;
+  }
+  function gmailHeader(payload, name) {
+    const h = ((payload && payload.headers) || []).find(x => x.name.toLowerCase() === name.toLowerCase());
+    return h ? h.value : "";
+  }
+
+  async function gmailVerifier(opts) {
+    opts = opts || {};
+    if (!state.gmail || !state.gmail.clientId) { openGmailAideModal(); return; }
+    toast("📬 Connexion à Gmail…");
+    let token;
+    try { token = await gmailGetToken(true); }
+    catch (e) { toast("Connexion Gmail impossible (" + e.message + "). Vérifiez l'ID client dans ⚙️ Réglages."); return; }
+    try {
+      const q = state.gmail.query || GMAIL_QUERY_DEFAUT;
+      const list = await gmailApi("messages?maxResults=25&q=" + encodeURIComponent(q), token);
+      const ids = (list.messages || []).map(m => m.id);
+      const connus = new Set(state.commandesSuivi.map(c => c.mailId).filter(Boolean).concat(state.mailsIgnores));
+      const nouveaux = ids.filter(id => !connus.has(id));
+      state.gmail.dernierCheck = new Date().toISOString();
+      try { localStorage.setItem("cybelestock-gmail-check", todayIso()); } catch (e) {}
+      const drafts = [];
+      for (const id of nouveaux) {
+        const msg = await gmailApi("messages/" + id + "?format=full", token);
+        const sujet = gmailHeader(msg.payload, "Subject"), from = gmailHeader(msg.payload, "From"), date = gmailHeader(msg.payload, "Date");
+        const text = gmailBody(msg.payload);
+        if (!ressembleCommande(text, sujet)) { state.mailsIgnores.push(id); continue; }
+        const d = parseCommandeTexte(text, { mailId: id, sujet, from, date });
+        d.mailFrom = from;
+        drafts.push(d);
+      }
+      // Garde la liste des mails ignorés à une taille raisonnable
+      if (state.mailsIgnores.length > 400) state.mailsIgnores = state.mailsIgnores.slice(-300);
+      save();
+      if (!drafts.length) { toast(opts.manuel ? "Aucune nouvelle commande trouvée dans les mails." : "📬 Mails vérifiés : rien de nouveau."); render(); return; }
+      proposerMails(drafts);
+    } catch (e) {
+      toast("Lecture Gmail impossible (" + e.message + "). L'API Gmail est-elle activée ?");
+    }
+  }
+
+  // Présente les commandes trouvées une par une
+  function proposerMails(drafts) {
+    const d = drafts.shift();
+    if (!d) { render(); return; }
+    const f = d.fournisseurId ? fournisseur(d.fournisseurId) : null;
+    openModal("📬 J'ai trouvé cette commande", `
+      <div class="scan-result-prod">
+        <div class="p-name">${esc(f ? f.name : (d.fournisseurNom || "Expéditeur inconnu"))}${d.numero ? " — n° " + esc(d.numero) : ""}</div>
+        <div class="p-sub">${fmtDate(d.date)}${d.total ? " · " + fmtEur(d.total) : ""} · ${d.lignes.length} article${d.lignes.length > 1 ? "s" : ""} reconnu${d.lignes.length > 1 ? "s" : ""}</div>
+      </div>
+      <div class="lot-sub" style="margin-bottom:8px">✉️ ${esc(d.mailSujet || "")}<br>${esc(d.mailFrom || "")}</div>
+      ${d.lignes.length ? `<div class="as-list" style="max-height:160px">${d.lignes.slice(0, 12).map(l => `<div class="as-item" style="font-weight:500">${l.qty} × ${esc(l.designation)}${l.prix ? " — " + fmtEur(l.prix) : ""}${l.produitId ? ' <span class="as-cat">→ ' + esc((produit(l.produitId) || {}).name || "") + "</span>" : ""}</div>`).join("")}</div>` : ""}
+      <p class="lot-sub" style="margin-top:10px">Dois-je l'intégrer au suivi des commandes ? Vous pourrez corriger chaque ligne avant de valider.${drafts.length ? ` (${drafts.length} autre${drafts.length > 1 ? "s" : ""} ensuite)` : ""}</p>`,
+      `<button class="btn" data-ignore style="justify-content:center">Non, ignorer</button>
+       <button class="btn" data-later style="justify-content:center">Plus tard</button>
+       <button class="btn btn-primary" data-ok style="flex:1;justify-content:center">Oui, intégrer →</button>`);
+    modalRoot.querySelector("[data-ignore]").onclick = () => { if (d.mailId) state.mailsIgnores.push(d.mailId); save(); closeModal(); proposerMails(drafts); };
+    modalRoot.querySelector("[data-later]").onclick = () => { closeModal(); proposerMails(drafts); };
+    modalRoot.querySelector("[data-ok]").onclick = () => { closeModal(); openCommandeModal(null, d); };
+  }
+
+  // Vérification quotidienne : proposée à l'ouverture (la connexion Gmail
+  // exige un clic de l'utilisateur, on ne peut pas la lancer toute seule).
+  function gmailVerifQuotidienne() {
+    if (!state.gmail || !state.gmail.clientId || state.gmail.auto === false) return;
+    let last = null; try { last = localStorage.getItem("cybelestock-gmail-check"); } catch (e) {}
+    if (last === todayIso()) return;
+    openModal("📬 Vérification des commandes", `
+      <p style="margin-bottom:8px">Voulez-vous que je regarde dans la boîte mail${state.gmail.compte ? " <strong>" + esc(state.gmail.compte) + "</strong>" : ""} s'il y a de nouvelles commandes à intégrer ?</p>
+      <p class="lot-sub">Je vous proposerai chaque commande trouvée ; rien n'est intégré sans votre accord.</p>`,
+      `<button class="btn" data-later style="flex:1;justify-content:center">Pas aujourd'hui</button>
+       <button class="btn btn-primary" data-ok style="flex:2;justify-content:center">Vérifier maintenant</button>`);
+    modalRoot.querySelector("[data-later]").onclick = () => { try { localStorage.setItem("cybelestock-gmail-check", todayIso()); } catch (e) {} closeModal(); };
+    modalRoot.querySelector("[data-ok]").onclick = () => { closeModal(); gmailVerifier({}); };
+  }
+
+  function openGmailAideModal() {
+    openModal("📬 Passerelle Gmail — mise en place", `
+      <p class="lot-sub" style="margin-bottom:8px">Pour que CybèleStock puisse lire les mails de commande (en lecture seule), Google demande un « ID client OAuth ». À faire une seule fois, environ 10 minutes :</p>
+      <ol style="margin:0 0 10px 18px;font-size:.9rem;line-height:1.7;color:var(--muted)">
+        <li>Ouvrir <a href="https://console.cloud.google.com/apis/library/gmail.googleapis.com?project=cybele-gestion" target="_blank" rel="noopener">Google Cloud → API Gmail</a> (projet <strong>cybele-gestion</strong>, celui de l'application) et cliquer <strong>Activer</strong>.</li>
+        <li>Menu <strong>API et services → Écran de consentement OAuth</strong> : type <em>Externe</em>, nom « CybèleStock », vos emails de contact, enregistrer. Dans « Utilisateurs test », ajouter <strong>cybeledent@gmail.com</strong>.</li>
+        <li>Menu <strong>Identifiants → Créer des identifiants → ID client OAuth</strong> : type <em>Application Web</em>. Dans « Origines JavaScript autorisées », ajouter l'adresse du site (ex. <code>${esc(location.origin)}</code>).</li>
+        <li>Copier l'ID client (se termine par <code>.apps.googleusercontent.com</code>) dans ⚙️ Réglages → Passerelle Gmail.</li>
+      </ol>
+      <p class="lot-sub">Ensuite, chaque jour à l'ouverture, CybèleStock proposera de vérifier la boîte mail. La 1<sup>re</sup> fois, Google demandera d'autoriser l'accès en lecture au compte cybeledent@gmail.com.</p>`,
+      `<button class="btn" data-cancel style="flex:1;justify-content:center">Fermer</button>
+       <button class="btn btn-primary" data-ok style="flex:1;justify-content:center">⚙️ Réglages</button>`);
+    modalRoot.querySelector("[data-cancel]").onclick = closeModal;
+    modalRoot.querySelector("[data-ok]").onclick = () => { closeModal(); switchView("reglages"); };
+  }
+
+  /* =========================================================
+     DÉPENSES & VALEUR DU STOCK
+     ========================================================= */
+  function renderFinances() {
+    const cmds = state.commandesSuivi.slice();
+    const parMois = {}, parAn = {};
+    cmds.forEach(c => {
+      const m = montantCommande(c); if (!m) return;
+      const mois = c.date.slice(0, 7), an = c.date.slice(0, 4);
+      parMois[mois] = (parMois[mois] || 0) + m;
+      parAn[an] = (parAn[an] || 0) + m;
+    });
+    const moisKeys = Object.keys(parMois).sort().reverse().slice(0, 18);
+    const anKeys = Object.keys(parAn).sort().reverse();
+    const maxMois = Math.max(1, ...moisKeys.map(k => parMois[k]));
+    const maxAn = Math.max(1, ...anKeys.map(k => parAn[k]));
+    const moisLabel = (k) => new Date(k + "-01T00:00:00").toLocaleDateString("fr-FR", { month: "long", year: "numeric" });
+    const barre = (label, val, max, sub) => `
+      <div class="bar-row"><div class="bar-label">${label}${sub ? `<div class="lot-sub">${sub}</div>` : ""}</div>
+        <div class="bar-track"><div class="bar-fill" style="width:${Math.max(2, Math.round(val / max * 100))}%"></div></div>
+        <div class="bar-val">${fmtEur(val)}</div></div>`;
+
+    // Valeur du stock
+    const hist = lignesPrix();
+    let valeur = 0, nbVal = 0, nbSans = 0; const parCat = {}; const sansPrix = [];
+    state.produits.forEach(p => {
+      const t = stockTotal(p); if (!t) return;
+      let vp = 0, ok = true;
+      p.lots.forEach(l => { const pu = prixUnitaire(p, l, hist); if (pu) vp += pu.prix * l.qty; else ok = false; });
+      if (ok) nbVal++; else { nbSans++; sansPrix.push(p); }
+      valeur += vp;
+      const cn = (categorie(p.categorieId) || {}).name || "Sans catégorie";
+      parCat[cn] = (parCat[cn] || 0) + vp;
+    });
+    const catKeys = Object.keys(parCat).sort((a, b) => parCat[b] - parCat[a]);
+    const maxCat = Math.max(1, ...catKeys.map(k => parCat[k]));
+
+    // Fourchette de prix par produit
+    const parProd = {};
+    hist.forEach(h => {
+      const e = parProd[h.produitId] || (parProd[h.produitId] = { min: h.prix, max: h.prix, last: h.prix, lastDate: h.date, n: 0, minDate: h.date, maxDate: h.date });
+      e.n++;
+      if (h.prix < e.min) { e.min = h.prix; e.minDate = h.date; }
+      if (h.prix > e.max) { e.max = h.prix; e.maxDate = h.date; }
+    });
+    const prodKeys = Object.keys(parProd).filter(id => produit(id)).sort((a, b) => produit(a).name.localeCompare(produit(b).name, "fr"));
+
+    return `
+      <div class="stat-tiles">
+        <div class="stat-tile main"><div class="stat-label">Valeur du stock au cabinet</div><div class="stat-val">${fmtEur(valeur)}</div>
+          <div class="lot-sub">${nbVal} produit${nbVal > 1 ? "s" : ""} valorisé${nbVal > 1 ? "s" : ""}${nbSans ? ` · <span style="color:var(--warn)">${nbSans} sans prix connu</span>` : ""}</div></div>
+        <div class="stat-tile"><div class="stat-label">Dépenses ${new Date().getFullYear()}</div><div class="stat-val">${fmtEur(parAn[String(new Date().getFullYear())] || 0)}</div></div>
+        <div class="stat-tile"><div class="stat-label">Ce mois-ci</div><div class="stat-val">${fmtEur(parMois[todayIso().slice(0, 7)] || 0)}</div></div>
+      </div>
+      <p class="lot-sub" style="margin:-4px 0 14px">Valeur = quantités en stock × dernier prix d'achat connu (issu des commandes, sinon prix indicatif de la référence). Les dépenses comptent toutes les commandes intégrées (en cours et archivées), à leur date de commande.</p>
+
+      <div class="card"><h4>📅 Dépenses par mois</h4>
+        ${moisKeys.length ? moisKeys.map(k => barre(moisLabel(k), parMois[k], maxMois)).join("") : '<div class="lot-sub">Aucune commande avec montant pour le moment.</div>'}</div>
+      <div class="card"><h4>📆 Dépenses par année</h4>
+        ${anKeys.length ? anKeys.map(k => barre(k, parAn[k], maxAn)).join("") : '<div class="lot-sub">—</div>'}</div>
+      <div class="card"><h4>📦 Valeur du stock par catégorie</h4>
+        ${catKeys.length ? catKeys.filter(k => parCat[k] > 0).map(k => barre(esc(k), parCat[k], maxCat)).join("") : '<div class="lot-sub">Stock vide ou sans prix.</div>'}
+        ${sansPrix.length ? `<div class="lot-sub" style="margin-top:10px">Sans prix connu : ${sansPrix.slice(0, 12).map(p => `<span data-goto="${p.id}" style="cursor:pointer;text-decoration:underline">${esc(p.name)}</span>`).join(", ")}${sansPrix.length > 12 ? "…" : ""} — renseignez un prix indicatif dans la référence, ou intégrez une commande.</div>` : ""}</div>
+      <div class="card"><h4>📈 Fourchette de prix d'achat</h4>
+        <p class="lot-sub" style="margin-bottom:8px">Prix unitaire le plus bas / le plus haut / dernier payé, d'après les commandes intégrées.</p>
+        ${prodKeys.length ? `<div class="price-table">
+          <div class="price-head"><span>Produit</span><span>Bas</span><span>Haut</span><span>Dernier</span></div>
+          ${prodKeys.map(id => { const e = parProd[id], p = produit(id); const hausse = e.last > e.min * 1.1;
+            return `<div class="price-row"><span data-goto="${id}" style="cursor:pointer">${esc(p.name)}<div class="lot-sub">${e.n} achat${e.n > 1 ? "s" : ""}</div></span>
+              <span class="price-min">${fmtEur(e.min)}<div class="lot-sub">${fmtDate(e.minDate)}</div></span>
+              <span class="price-max">${fmtEur(e.max)}<div class="lot-sub">${fmtDate(e.maxDate)}</div></span>
+              <span class="${hausse ? "price-up" : ""}">${fmtEur(e.last)}<div class="lot-sub">${fmtDate(e.lastDate)}</div></span></div>`; }).join("")}
+        </div>` : '<div class="lot-sub">Dès qu\'une commande avec des prix est intégrée, l\'historique apparaît ici.</div>'}</div>`;
+  }
+  function bindFinances() {
+    app.querySelectorAll("[data-goto]").forEach(el => el.onclick = () => switchView("fiche", { produitId: el.dataset.goto, ficheTab: "refs" }));
+  }
+
+  /* =========================================================
+     POINTS DE RESTAURATION (copies de sécurité dans le cloud)
+     - « cybelestock-avant-commandes » : état figé avant la v2
+     - « cybelestock-snap-<jour> » : état du matin, 7 jours glissants
+     ========================================================= */
+  const SNAP_JOURS = ["dimanche", "lundi", "mardi", "mercredi", "jeudi", "vendredi", "samedi"];
+  function snapshotQuotidien(etat) {
+    if (!window.CybeleDB) return;
+    let last = null; try { last = localStorage.getItem("cybelestock-snap-date"); } catch (e) {}
+    if (last === todayIso()) return;
+    const key = "cybelestock-snap-" + SNAP_JOURS[new Date().getDay()];
+    window.CybeleDB.save(key, etat).then(() => { try { localStorage.setItem("cybelestock-snap-date", todayIso()); } catch (e) {} }).catch(() => {});
+  }
+  function openRestaurationModal() {
+    if (!window.CybeleDB || !window.CybeleDB.loadFull) { toast("Points de restauration disponibles uniquement en ligne."); return; }
+    openModal("🛟 Points de restauration", `<div class="lot-sub">Chargement…</div>`,
+      `<button class="btn" data-cancel style="flex:1;justify-content:center">Fermer</button>`);
+    modalRoot.querySelector("[data-cancel]").onclick = closeModal;
+    const keys = ["cybelestock-avant-commandes", "cybelestock-avant-restauration"].concat(SNAP_JOURS.map(j => "cybelestock-snap-" + j));
+    Promise.all(keys.map(k => window.CybeleDB.loadFull(k).then(r => ({ k, r })).catch(() => ({ k, r: null })))).then(rows => {
+      const body = modalRoot.querySelector(".modal-body"); if (!body) return;
+      const dispo = rows.filter(x => x.r && x.r.state).sort((a, b) => (b.r.ts || 0) - (a.r.ts || 0));
+      body.innerHTML = `
+        <p class="lot-sub" style="margin-bottom:8px">Copies automatiques de vos données (état du matin, 7 jours glissants, plus l'état d'avant la mise en place du suivi des commandes).
+        Restaurer remplace les données actuelles — une copie « avant restauration » est faite juste avant.</p>
+        ${dispo.length ? dispo.map(x => {
+          const s = x.r.state, nP = (s.produits || []).length, nL = (s.produits || []).reduce((t, p) => t + (p.lots || []).reduce((u, l) => u + (Number(l.qty) || 0), 0), 0);
+          const label = x.k === "cybelestock-avant-commandes" ? "Avant le suivi des commandes" : x.k === "cybelestock-avant-restauration" ? "Avant la dernière restauration" : "Copie du " + x.k.replace("cybelestock-snap-", "");
+          return `<div class="settings-row"><div class="grow"><div style="font-weight:600">${label}</div>
+            <div class="settings-sub">${x.r.ts ? new Date(x.r.ts).toLocaleString("fr-FR") : "date inconnue"} · ${nP} produits · ${nL} unités en stock · ${(s.commandesSuivi || []).length} commandes</div></div>
+            <button class="btn btn-sm" data-restore="${x.k}">Restaurer</button></div>`;
+        }).join("") : '<div class="lot-sub">Aucune copie disponible pour l\'instant (elles se créent automatiquement à chaque première ouverture de la journée).</div>'}`;
+      body.querySelectorAll("[data-restore]").forEach(b => b.onclick = async () => {
+        const row = rows.find(x => x.k === b.dataset.restore); if (!row || !row.r) return;
+        if (!confirm("Remplacer les données actuelles par cette copie ?\nUne copie de l'état actuel sera conservée (« Avant la dernière restauration »).")) return;
+        try { await window.CybeleDB.save("cybelestock-avant-restauration", state); } catch (e) { if (!confirm("La copie de sécurité n'a pas pu être faite. Continuer quand même ?")) return; }
+        state = normalize(row.r.state);
+        save(); closeModal(); render(); toast("Données restaurées.");
+      });
+    });
+  }
+
+  /* =========================================================
      VUE : RÉGLAGES
      ========================================================= */
   function renderReglages() {
@@ -1544,6 +2516,29 @@
       </div>
 
       <div class="card">
+        <h4>📬 Passerelle Gmail (commandes)</h4>
+        <p class="settings-sub" style="margin-bottom:10px">
+          CybèleStock peut lire (en lecture seule) la boîte mail du cabinet pour repérer les confirmations de commande
+          et vous proposer de les intégrer. <button class="auth-link" id="rg-gmail-aide" style="display:inline;margin:0">Comment l'activer ?</button></p>
+        <div class="form-grid">
+          <div class="field full"><label>ID client OAuth Google</label>
+            <input id="rg-gmail-client" value="${esc((state.gmail || {}).clientId || "")}" placeholder="xxxxxxxx.apps.googleusercontent.com"></div>
+          <div class="field"><label>Compte Gmail</label>
+            <input id="rg-gmail-compte" value="${esc((state.gmail || {}).compte || "cybeledent@gmail.com")}"></div>
+          <div class="field"><label>Proposer la vérification</label>
+            <select id="rg-gmail-auto"><option value="oui" ${(state.gmail || {}).auto === false ? "" : "selected"}>Chaque jour à l'ouverture</option><option value="non" ${(state.gmail || {}).auto === false ? "selected" : ""}>Seulement à la demande</option></select></div>
+          <div class="field full"><label>Recherche Gmail (avancé)</label>
+            <input id="rg-gmail-query" value="${esc((state.gmail || {}).query || "")}" placeholder="${esc(GMAIL_QUERY_DEFAUT)}">
+            <div class="field-hint">Vide = recherche par défaut (mails des 60 derniers jours contenant « commande », « confirmation », « facture »…).</div></div>
+        </div>
+        <div class="toolbar">
+          <button class="btn btn-primary btn-sm" id="rg-gmail-save">Enregistrer</button>
+          <button class="btn btn-sm" id="rg-gmail-test" ${(state.gmail || {}).clientId ? "" : "disabled"}>📬 Vérifier maintenant</button>
+          ${(state.gmail || {}).dernierCheck ? `<span class="settings-sub">Dernière vérification : ${new Date(state.gmail.dernierCheck).toLocaleString("fr-FR")}</span>` : ""}
+        </div>
+      </div>
+
+      <div class="card">
         <h4>Sauvegarde</h4>
         <p class="settings-sub" style="margin-bottom:10px">
           Les données sont synchronisées en ligne (mêmes identifiants sur téléphone et ordinateur).
@@ -1551,7 +2546,9 @@
         <div class="toolbar">
           <button class="btn btn-sm" id="rg-export">⬇ Télécharger une sauvegarde</button>
           <button class="btn btn-sm" id="rg-import">⬆ Restaurer une sauvegarde</button>
+          <button class="btn btn-sm" id="rg-restore-points">🛟 Points de restauration</button>
         </div>
+        <p class="settings-sub" style="margin-top:8px">Une copie automatique de vos données est faite en ligne à la première ouverture de chaque journée (7 jours glissants).</p>
       </div>`;
 
     document.getElementById("btn-add-f").onclick = () => openFournisseurModal(null);
@@ -1566,6 +2563,19 @@
     });
     document.getElementById("rg-export").onclick = doExport;
     document.getElementById("rg-import").onclick = () => document.getElementById("import-file").click();
+    document.getElementById("rg-restore-points").onclick = openRestaurationModal;
+    document.getElementById("rg-gmail-aide").onclick = openGmailAideModal;
+    document.getElementById("rg-gmail-save").onclick = () => {
+      state.gmail = Object.assign({}, state.gmail, {
+        clientId: document.getElementById("rg-gmail-client").value.trim(),
+        compte: document.getElementById("rg-gmail-compte").value.trim(),
+        auto: document.getElementById("rg-gmail-auto").value === "oui",
+        query: document.getElementById("rg-gmail-query").value.trim(),
+      });
+      gmailToken = null;
+      save(); render(); toast("Réglages Gmail enregistrés.");
+    };
+    document.getElementById("rg-gmail-test").onclick = () => gmailVerifier({ manuel: true });
   }
 
   /* =========================================================
@@ -1618,6 +2628,10 @@
         <li><strong>🛒 Courses</strong> : dès qu'un stock passe sous son seuil, le produit apparaît ici avec
           les liens vers vos fournisseurs. « ✔ Commandé » le met en attente de réception.</li>
         <li><strong>⏰ Péremption</strong> : lots périmés ou bientôt périmés (alerte activable produit par produit).</li>
+        <li><strong>🧾 Commandes</strong> : intégrez vos commandes (à la main, en collant le mail du fournisseur, ou via la
+          passerelle Gmail). À la livraison, « 📷 Scanner la réception » : chaque scan valide une ligne et entre les boîtes en stock.
+          Commande complète → on vous propose de l'archiver ; incomplète → elle passe en orange avec ses reliquats en haut.
+          L'onglet « Dépenses & valeur » montre les dépenses par mois/année, la fourchette de prix par produit et la valeur du stock.</li>
         <li><strong>⚙️ Réglages</strong> : fournisseurs (liens, notes franco de port), catégories, sauvegardes.</li>
       </ul>
       <p style="background:var(--accent-light);padding:12px;border-radius:10px;font-size:.88rem">
@@ -1747,6 +2761,17 @@
     } else {
       state = local || seed();
     }
+    // Sécurité : copie figée de l'état AVANT la mise en place du suivi des
+    // commandes (une seule fois), puis copie quotidienne de l'état du matin.
+    if (window.CybeleDB && state && typeof state === "object") {
+      if (!state.snapshotAvantCommandes) {
+        const avant = JSON.parse(JSON.stringify(state));
+        window.CybeleDB.save("cybelestock-avant-commandes", avant)
+          .then(() => { state.snapshotAvantCommandes = Date.now(); save(); })
+          .catch(() => {});
+      }
+      snapshotQuotidien(state);
+    }
     state = normalize(state);
     // Migration : si l'état chargé est encore l'ancien état d'essai
     // (vide, ou un seul produit « exemple »), on installe le vrai
@@ -1756,6 +2781,9 @@
       save();
     }
     render();
+    setTimeout(gmailVerifQuotidienne, 800);
   }
+  // Outils de test (aperçu local uniquement)
+  if (/^(localhost|127\.)/.test(location.hostname)) window.CybeleStockDebug = { parseCommandeTexte, htmlToText };
   init();
 })();
