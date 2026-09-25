@@ -524,7 +524,7 @@
     const mois6 = derniersMois(6);
     const maxM = Math.max(1, ...mois6.map(k => fin.parMois[k] || 0));
     const catKeys = Object.keys(fin.parCat).filter(k => fin.parCat[k] > 0).sort((a, b) => fin.parCat[b] - fin.parCat[a]).slice(0, 4);
-    const sousSeuil = besoin.length + enAttente.length;
+    const enStock = state.produits.filter(p => stockTotal(p) > 0).length;
     const nbPerempt = past.length + soon.length;
     const prenom = prenomUtilisateur();
     const dateJour = new Date().toLocaleDateString("fr-FR", { weekday: "long", day: "numeric", month: "long" });
@@ -549,8 +549,8 @@
         <p>${dateJour.charAt(0).toUpperCase() + dateJour.slice(1)}${sousTitre.length ? " · " + sousTitre.join(" · ") : " · tout est en ordre"}</p>
       </div>
       <div class="kpis">
-        ${kpi(sousSeuil ? "amber" : "teal", "alert", sousSeuil, `produit${sousSeuil > 1 ? "s" : ""} sous le seuil`, "courses")}
-        ${kpi("teal", "cart", besoin.length, "à commander", "courses")}
+        ${kpi(besoin.length ? "amber" : "teal", "alert", besoin.length, `produit${besoin.length > 1 ? "s" : ""} à commander`, "courses")}
+        ${kpi("teal", "box", enStock, `produit${enStock > 1 ? "s" : ""} en stock <span style="font-weight:400">/ ${state.produits.length}</span>`, "stock")}
         ${kpi("blue", "truck", aRecevoir, `commande${aRecevoir > 1 ? "s" : ""} à réceptionner`, "commandes")}
         ${kpi(past.length ? "red" : "purple", "clock", nbPerempt, `péremption${nbPerempt > 1 ? "s" : ""} à surveiller`, "peremption")}
       </div>
