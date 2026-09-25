@@ -2151,7 +2151,7 @@
 
     /* ---- Date : « passée le … », « du … », « Le 25 sept. 2026 », sinon date du mail ---- */
     const anneeMail = meta.date && !isNaN(new Date(meta.date)) ? new Date(meta.date).getFullYear() : new Date().getFullYear();
-    const dm = /(?:date\s*(?:de\s*(?:la\s*)?commande)?|command[ée]e?\s*le|pass[ée]e\s*le|\bdu|^\s*le)[\s|:\-]*(?:(?:lundi|mardi|mercredi|jeudi|vendredi|samedi|dimanche)\s+)?(\d{1,2}(?:[\/.\-]\d{1,2}[\/.\-]\d{4}|(?:er)?\s+[a-zéû]+\.?(?:\s+\d{4})?))/im.exec(t);
+    const dm = /(?:date\s*(?:de\s*(?:la\s*)?commande|d'achat)?|temps\s*de\s*commande|pay[ée]e?\s*(?:le|sur)|command[ée]e?\s*le|pass[ée]e\s*le|\bdu|^\s*le)[\s|:\-]*(?:(?:lundi|mardi|mercredi|jeudi|vendredi|samedi|dimanche)\s+)?(\d{1,2}(?:[\/.\-]\d{1,2}[\/.\-]\d{4}|(?:er)?\s+[a-zéû]+\.?(?:\s+\d{4})?))/im.exec(t);
     draft.date = (dm && parseDateFr(dm[1], anneeMail)) || (meta.date ? localIso(new Date(meta.date)) : null) || todayIso();
 
     /* ---- Montants ---- */
@@ -2192,7 +2192,7 @@
     const refLabel = /\[?\s*(?:r[ée]f(?:[ée]rence)?\.?|sku|code\s*article)\s*:?\s*(?=[A-Z0-9\-\/._]*\d)([A-Z0-9][A-Z0-9\-\/._]{2,})/i;
     const refOnly = /^\|?\s*\[?\s*(?:r[ée]f(?:[ée]rence)?\.?|sku|code\s*article)\s*:?\s*[A-Z0-9][A-Z0-9\-\/._]{2,}\s*\]?\s*\|?\s*$/i;
     const pctCell = /^\d{1,2}(?:[,.]\d+)?\s*%$/;
-    const stop = /(?<![a-z0-9])(sous[\s\-]?total|total|tva|t\.v\.a|taxes?|frais|port|exp[ée]dition|livraison|emballage|participation|remise|r[ée]duction|[ée]conomis[ée]|coupon|code\s*promo|montant|paiement|adresse|t[ée]l(?:[ée]phone)?|iban|siret|rpps|num[ée]ro\s*de\s*client|r[ée]sum[ée]|r[ée]capitulatif|d[ée]tail\s*de\s*(?:la\s*)?commande)(?![a-z0-9])/i;
+    const stop = /(?<![a-z0-9])(sous[\s\-]?total|total|tva|t\.v\.a|taxes?|frais|port|exp[ée]dition|livraison|emballage|participation|remise|rabais|r[ée]duction|[ée]conomis[ée]|coupon|code\s*promo|promo|importation|douane|montant|paiement|pay[ée]e?\s*(?:le|sur|par)|mastercard|visa|carte\s*bancaire|adresse|t[ée]l(?:[ée]phone)?|iban|siret|rpps|num[ée]ro\s*de\s*client|r[ée]sum[ée]|r[ée]capitulatif|d[ée]tail\s*de\s*(?:la\s*)?commande)(?![a-z0-9])/i;
     const header = /\b(produits?|articles?|d[ée]signation|description|r[ée]f[ée]rence|qt[ée]|quantit[ée]|prix|total)\b/ig;
     const lines = t.split("\n").map(s => s.trim());
     let pending = [];
@@ -2226,6 +2226,7 @@
       const s = lines[i];
       if (!s || /^[|\s]*$/.test(s)) { pending = pending.length ? [pending[pending.length - 1]] : []; ignorerBloc = false; continue; }
       if (/(?:^|[\s|(])-\s?\d+[,.]\d{2}/.test(s)) { pending = []; continue; } // remise (montant négatif)
+      if (/\*{3,}\d{2,}|\d{2,}\*{3,}/.test(s)) { pending = []; dernierSansPrix = null; continue; } // numéro de carte masqué
       // « SKU : XXX » seul sur sa ligne : référence de l'article précédent (ou du suivant), jamais un article
       if (refOnly.test(s)) {
         const rm = refLabel.exec(s);
