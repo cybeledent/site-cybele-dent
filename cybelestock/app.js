@@ -1597,7 +1597,7 @@
     return n.toLocaleString("fr-FR", { minimumFractionDigits: 2, maximumFractionDigits: 2 }) + " €";
   }
   const STATUT_LABEL = { attente: "En attente de livraison", partielle: "Partiellement reçue", recue: "Tout est arrivé", archivee: "Archivée" };
-  const STATUT_ICON = { attente: "🕒", partielle: "🟠", recue: "✅", archivee: "🗄" };
+  const STATUT_ICON = { attente: "🕒", partielle: "⚠", recue: "✔", archivee: "📁" };
 
   // Marque les produits de la commande « commandés » dans la liste de courses
   function marquerCommandesCourses(c) {
@@ -1642,12 +1642,12 @@
     const gmailOk = !!(state.gmail && state.gmail.clientId);
 
     let html = `
-      <h2 class="view-title">🧾 Commandes</h2>
+      <h2 class="view-title">🚚 Commandes</h2>
       <p class="view-sub">Suivi des commandes fournisseurs : réception par scan, reliquats, dépenses et valeur du stock.</p>
       <div class="fiche-tabs">
-        <button class="fiche-tab ${cmdTab === "encours" ? "active" : ""}" data-ctab="encours">📬 En cours (${enCours.length})</button>
-        <button class="fiche-tab ${cmdTab === "archivees" ? "active" : ""}" data-ctab="archivees">🗄 Archivées (${archivees.length})</button>
-        <button class="fiche-tab ${cmdTab === "finances" ? "active" : ""}" data-ctab="finances">📊 Dépenses & valeur</button>
+        <button class="fiche-tab ${cmdTab === "encours" ? "active" : ""}" data-ctab="encours">✉ En cours (${enCours.length})</button>
+        <button class="fiche-tab ${cmdTab === "archivees" ? "active" : ""}" data-ctab="archivees">📁 Archivées (${archivees.length})</button>
+        <button class="fiche-tab ${cmdTab === "finances" ? "active" : ""}" data-ctab="finances">€ Dépenses & valeur</button>
       </div>`;
 
     if (cmdTab === "finances") {
@@ -1656,8 +1656,8 @@
       html += `
         <div class="toolbar">
           <button class="btn btn-primary btn-sm" id="cmd-new">＋ Nouvelle commande</button>
-          <button class="btn btn-sm" id="cmd-paste">✉️ Coller un mail de commande</button>
-          <button class="btn btn-sm" id="cmd-gmail" title="${gmailOk ? "Chercher les mails de commande dans la boîte Gmail" : "À configurer dans ⚙️ Réglages"}">📬 Vérifier mes mails${gmailOk ? "" : " (à configurer)"}</button>
+          <button class="btn btn-sm" id="cmd-paste">✉ Coller un mail de commande</button>
+          <button class="btn btn-sm" id="cmd-gmail" title="${gmailOk ? "Chercher les mails de commande dans la boîte Gmail" : "À configurer dans ⚙️ Réglages"}">✉ Vérifier mes mails${gmailOk ? "" : " (à configurer)"}</button>
         </div>`;
       const list = cmdTab === "encours" ? enCours : archivees;
       if (!list.length) {
@@ -1692,7 +1692,7 @@
           <span class="cmd-icon">${STATUT_ICON[c.statut]}</span>
           <div class="grow">
             <div class="cmd-title">${esc(nomFournisseurCommande(c))} <span class="cmd-num">${c.numero ? "n° " + esc(c.numero) : "sans n°"}</span></div>
-            <div class="lot-sub">${fmtDate(c.date)} · ${c.lignes.length} ligne${c.lignes.length > 1 ? "s" : ""} · ${fmtEur(montantCommande(c))}${c.source === "mail" ? " · ✉️" : ""}</div>
+            <div class="lot-sub">${fmtDate(c.date)} · ${c.lignes.length} ligne${c.lignes.length > 1 ? "s" : ""} · ${fmtEur(montantCommande(c))}${c.source === "mail" ? " · ✉" : ""}</div>
           </div>
           <span class="cmd-statut">${STATUT_LABEL[c.statut]}</span>
         </div>
@@ -1748,7 +1748,7 @@
       <div class="toolbar">
         <button class="btn btn-primary" id="cmd-scan" ${rel.length ? "" : "disabled"}>📷 Scanner la réception</button>
         <button class="btn" id="cmd-edit">✎ Modifier</button>
-        ${c.statut === "recue" ? `<button class="btn" id="cmd-archive">🗄 Archiver</button>` : ""}
+        ${c.statut === "recue" ? `<button class="btn" id="cmd-archive">📁 Archiver</button>` : ""}
         <button class="btn btn-danger btn-sm" id="cmd-del" style="margin-left:auto">🗑</button>
       </div>
       <div class="cmd-progress"><div style="width:${totalQty ? Math.round(recuQty / totalQty * 100) : 0}%"></div></div>
@@ -1759,13 +1759,13 @@
       </div>`}`;
 
     if (c.statut === "partielle" && rel.length) {
-      html += `<div class="card card-warn"><h4>🟠 Reliquat — encore attendu (${rel.length})</h4>
+      html += `<div class="card card-warn"><h4>⚠ Reliquat — encore attendu (${rel.length})</h4>
         ${rel.map(l => ligneHtml(l, true)).join("")}</div>`;
     }
     html += `<div class="card"><h4>Articles commandés (${c.lignes.length})</h4>
       ${c.lignes.length ? c.lignes.map(l => ligneHtml(l, false)).join("") : '<div class="lot-sub" style="padding:8px 0">Aucune ligne — cliquez sur « ✎ Modifier » pour en ajouter.</div>'}
     </div>`;
-    if (c.note || c.mailSujet) html += `<div class="card"><h4>Note</h4><div class="lot-sub" style="white-space:pre-wrap">${c.mailSujet ? "✉️ " + esc(c.mailSujet) + "\n" : ""}${esc(c.note || "")}</div></div>`;
+    if (c.note || c.mailSujet) html += `<div class="card"><h4>Note</h4><div class="lot-sub" style="white-space:pre-wrap">${c.mailSujet ? "✉ " + esc(c.mailSujet) + "\n" : ""}${esc(c.note || "")}</div></div>`;
 
     app.innerHTML = html;
     document.getElementById("cmd-back").onclick = () => switchView("commandes");
@@ -1804,7 +1804,7 @@
       const refOk = l.refId && reference(p, l.refId) ? l.refId : (p.references[0] ? p.references[0].id : null);
       openEntreeModal(p.id, {
         scanned, refId: refOk, qty: reste || 1,
-        hint: `🧾 Commande ${esc(c.numero || "")} — ${reste} attendu${reste > 1 ? "s" : ""} sur cette ligne. La quantité saisie entre en stock et valide la réception.`,
+        hint: `🚚 Commande ${esc(c.numero || "")} — ${reste} attendu${reste > 1 ? "s" : ""} sur cette ligne. La quantité saisie entre en stock et valide la réception.`,
         onDone: apres,
       });
     } else {
@@ -1834,7 +1834,7 @@
       <p style="margin-bottom:10px">Tous les articles de la commande <strong>${esc(nomFournisseurCommande(c))}${c.numero ? " n° " + esc(c.numero) : ""}</strong> ont été reçus.</p>
       <p class="lot-sub">On l'archive ? Elle restera consultable dans « Archivées » et comptera dans les dépenses.</p>`,
       `<button class="btn" data-later style="flex:1;justify-content:center">Plus tard</button>
-       <button class="btn btn-primary" data-ok style="flex:2;justify-content:center">🗄 Archiver</button>`);
+       <button class="btn btn-primary" data-ok style="flex:2;justify-content:center">📁 Archiver</button>`);
     modalRoot.querySelector("[data-later]").onclick = () => { closeModal(); render(); };
     modalRoot.querySelector("[data-ok]").onclick = () => { closeModal(); archiverCommande(c); };
   }
@@ -1858,7 +1858,7 @@
     if (!lignes.length) lignes.push({ id: uid(), designation: "", ref: "", produitId: null, refId: null, qty: 1, prix: 0, recu: 0 });
     const prods = state.produits.slice().sort((a, b) => a.name.localeCompare(b.name, "fr"));
 
-    openModal(existing ? "✎ Commande" : (draft ? "✉️ Commande trouvée — vérifiez puis intégrez" : "＋ Nouvelle commande"), `
+    openModal(existing ? "✎ Commande" : (draft ? "✉ Commande trouvée — vérifiez puis intégrez" : "＋ Nouvelle commande"), `
       <div class="form-grid">
         <div class="field"><label>Fournisseur</label>
           <select id="cm-fourn">
@@ -1878,7 +1878,7 @@
       <div id="cm-lines"></div>
       <button class="btn btn-sm" id="cm-add-line" style="margin-top:8px">＋ Ajouter un article</button>
       <div class="field full" style="margin-top:12px"><label>Note</label><input id="cm-note" value="${esc(c.note || "")}" placeholder="facultatif"></div>
-      ${draft && draft.mailSujet ? `<div class="field-hint" style="margin-top:8px">✉️ ${esc(draft.mailSujet)}</div>` : ""}`,
+      ${draft && draft.mailSujet ? `<div class="field-hint" style="margin-top:8px">✉ ${esc(draft.mailSujet)}</div>` : ""}`,
       `<button class="btn" data-cancel style="flex:1;justify-content:center">Annuler</button>
        <button class="btn btn-primary" data-ok style="flex:2;justify-content:center">${existing ? "Enregistrer" : "✔ Intégrer la commande"}</button>`);
 
@@ -2186,7 +2186,7 @@
   }
 
   function openCollerMailModal() {
-    openModal("✉️ Coller un mail de commande", `
+    openModal("✉ Coller un mail de commande", `
       <p class="lot-sub" style="margin-bottom:8px">Ouvrez le mail de confirmation du fournisseur, sélectionnez tout (Ctrl+A), copiez (Ctrl+C) et collez ici.
       Je repère le n° de commande, la date, le total et les articles — vous vérifiez tout avant d'intégrer.</p>
       <div class="field full"><textarea id="cm-paste" style="min-height:180px" placeholder="Collez le texte du mail ici…"></textarea></div>`,
@@ -2273,7 +2273,7 @@
   async function gmailVerifier(opts) {
     opts = opts || {};
     if (!state.gmail || !state.gmail.clientId) { openGmailAideModal(); return; }
-    toast("📬 Connexion à Gmail…");
+    toast("✉ Connexion à Gmail…");
     let token;
     try { token = await gmailGetToken(true); }
     catch (e) { toast("Connexion Gmail impossible (" + e.message + "). Vérifiez l'ID client dans ⚙️ Réglages."); return; }
@@ -2298,7 +2298,7 @@
       // Garde la liste des mails ignorés à une taille raisonnable
       if (state.mailsIgnores.length > 400) state.mailsIgnores = state.mailsIgnores.slice(-300);
       save();
-      if (!drafts.length) { toast(opts.manuel ? "Aucune nouvelle commande trouvée dans les mails." : "📬 Mails vérifiés : rien de nouveau."); render(); return; }
+      if (!drafts.length) { toast(opts.manuel ? "Aucune nouvelle commande trouvée dans les mails." : "✉ Mails vérifiés : rien de nouveau."); render(); return; }
       proposerMails(drafts);
     } catch (e) {
       toast("Lecture Gmail impossible (" + e.message + "). L'API Gmail est-elle activée ?");
@@ -2310,12 +2310,12 @@
     const d = drafts.shift();
     if (!d) { render(); return; }
     const f = d.fournisseurId ? fournisseur(d.fournisseurId) : null;
-    openModal("📬 J'ai trouvé cette commande", `
+    openModal("✉ J'ai trouvé cette commande", `
       <div class="scan-result-prod">
         <div class="p-name">${esc(f ? f.name : (d.fournisseurNom || "Expéditeur inconnu"))}${d.numero ? " — n° " + esc(d.numero) : ""}</div>
         <div class="p-sub">${fmtDate(d.date)}${d.total ? " · " + fmtEur(d.total) : ""} · ${d.lignes.length} article${d.lignes.length > 1 ? "s" : ""} reconnu${d.lignes.length > 1 ? "s" : ""}</div>
       </div>
-      <div class="lot-sub" style="margin-bottom:8px">✉️ ${esc(d.mailSujet || "")}<br>${esc(d.mailFrom || "")}</div>
+      <div class="lot-sub" style="margin-bottom:8px">✉ ${esc(d.mailSujet || "")}<br>${esc(d.mailFrom || "")}</div>
       ${d.lignes.length ? `<div class="as-list" style="max-height:160px">${d.lignes.slice(0, 12).map(l => `<div class="as-item" style="font-weight:500">${l.qty} × ${esc(l.designation)}${l.prix ? " — " + fmtEur(l.prix) : ""}${l.produitId ? ' <span class="as-cat">→ ' + esc((produit(l.produitId) || {}).name || "") + "</span>" : ""}</div>`).join("")}</div>` : ""}
       <p class="lot-sub" style="margin-top:10px">Dois-je l'intégrer au suivi des commandes ? Vous pourrez corriger chaque ligne avant de valider.${drafts.length ? ` (${drafts.length} autre${drafts.length > 1 ? "s" : ""} ensuite)` : ""}</p>`,
       `<button class="btn" data-ignore style="justify-content:center">Non, ignorer</button>
@@ -2332,7 +2332,7 @@
     if (!state.gmail || !state.gmail.clientId || state.gmail.auto === false) return;
     let last = null; try { last = localStorage.getItem("cybelestock-gmail-check"); } catch (e) {}
     if (last === todayIso()) return;
-    openModal("📬 Vérification des commandes", `
+    openModal("✉ Vérification des commandes", `
       <p style="margin-bottom:8px">Voulez-vous que je regarde dans la boîte mail${state.gmail.compte ? " <strong>" + esc(state.gmail.compte) + "</strong>" : ""} s'il y a de nouvelles commandes à intégrer ?</p>
       <p class="lot-sub">Je vous proposerai chaque commande trouvée ; rien n'est intégré sans votre accord.</p>`,
       `<button class="btn" data-later style="flex:1;justify-content:center">Pas aujourd'hui</button>
@@ -2342,7 +2342,7 @@
   }
 
   function openGmailAideModal() {
-    openModal("📬 Passerelle Gmail — mise en place", `
+    openModal("✉ Passerelle Gmail — mise en place", `
       <p class="lot-sub" style="margin-bottom:8px">Pour que CybèleStock puisse lire les mails de commande (en lecture seule), Google demande un « ID client OAuth ». À faire une seule fois, environ 10 minutes :</p>
       <ol style="margin:0 0 10px 18px;font-size:.9rem;line-height:1.7;color:var(--muted)">
         <li>Ouvrir <a href="https://console.cloud.google.com/apis/library/gmail.googleapis.com?project=cybele-gestion" target="_blank" rel="noopener">Google Cloud → API Gmail</a> (projet <strong>cybele-gestion</strong>, celui de l'application) et cliquer <strong>Activer</strong>.</li>
@@ -2420,7 +2420,7 @@
       <div class="card"><h4>📦 Valeur du stock par catégorie</h4>
         ${catKeys.length ? catKeys.filter(k => parCat[k] > 0).map(k => barre(esc(k), parCat[k], maxCat)).join("") : '<div class="lot-sub">Stock vide ou sans prix.</div>'}
         ${sansPrix.length ? `<div class="lot-sub" style="margin-top:10px">Sans prix connu : ${sansPrix.slice(0, 12).map(p => `<span data-goto="${p.id}" style="cursor:pointer;text-decoration:underline">${esc(p.name)}</span>`).join(", ")}${sansPrix.length > 12 ? "…" : ""} — renseignez un prix indicatif dans la référence, ou intégrez une commande.</div>` : ""}</div>
-      <div class="card"><h4>📈 Fourchette de prix d'achat</h4>
+      <div class="card"><h4>↗ Fourchette de prix d'achat</h4>
         <p class="lot-sub" style="margin-bottom:8px">Prix unitaire le plus bas / le plus haut / dernier payé, d'après les commandes intégrées.</p>
         ${prodKeys.length ? `<div class="price-table">
           <div class="price-head"><span>Produit</span><span>Bas</span><span>Haut</span><span>Dernier</span></div>
@@ -2450,7 +2450,7 @@
   }
   function openRestaurationModal() {
     if (!window.CybeleDB || !window.CybeleDB.loadFull) { toast("Points de restauration disponibles uniquement en ligne."); return; }
-    openModal("🛟 Points de restauration", `<div class="lot-sub">Chargement…</div>`,
+    openModal("↺ Points de restauration", `<div class="lot-sub">Chargement…</div>`,
       `<button class="btn" data-cancel style="flex:1;justify-content:center">Fermer</button>`);
     modalRoot.querySelector("[data-cancel]").onclick = closeModal;
     const keys = ["cybelestock-avant-commandes", "cybelestock-avant-restauration"].concat(SNAP_JOURS.map(j => "cybelestock-snap-" + j));
@@ -2516,7 +2516,7 @@
       </div>
 
       <div class="card">
-        <h4>📬 Passerelle Gmail (commandes)</h4>
+        <h4>✉ Passerelle Gmail (commandes)</h4>
         <p class="settings-sub" style="margin-bottom:10px">
           CybèleStock peut lire (en lecture seule) la boîte mail du cabinet pour repérer les confirmations de commande
           et vous proposer de les intégrer. <button class="auth-link" id="rg-gmail-aide" style="display:inline;margin:0">Comment l'activer ?</button></p>
@@ -2533,7 +2533,7 @@
         </div>
         <div class="toolbar">
           <button class="btn btn-primary btn-sm" id="rg-gmail-save">Enregistrer</button>
-          <button class="btn btn-sm" id="rg-gmail-test" ${(state.gmail || {}).clientId ? "" : "disabled"}>📬 Vérifier maintenant</button>
+          <button class="btn btn-sm" id="rg-gmail-test" ${(state.gmail || {}).clientId ? "" : "disabled"}>✉ Vérifier maintenant</button>
           ${(state.gmail || {}).dernierCheck ? `<span class="settings-sub">Dernière vérification : ${new Date(state.gmail.dernierCheck).toLocaleString("fr-FR")}</span>` : ""}
         </div>
       </div>
@@ -2546,7 +2546,7 @@
         <div class="toolbar">
           <button class="btn btn-sm" id="rg-export">⬇ Télécharger une sauvegarde</button>
           <button class="btn btn-sm" id="rg-import">⬆ Restaurer une sauvegarde</button>
-          <button class="btn btn-sm" id="rg-restore-points">🛟 Points de restauration</button>
+          <button class="btn btn-sm" id="rg-restore-points">↺ Points de restauration</button>
         </div>
         <p class="settings-sub" style="margin-top:8px">Une copie automatique de vos données est faite en ligne à la première ouverture de chaque journée (7 jours glissants).</p>
       </div>`;
@@ -2628,7 +2628,7 @@
         <li><strong>🛒 Courses</strong> : dès qu'un stock passe sous son seuil, le produit apparaît ici avec
           les liens vers vos fournisseurs. « ✔ Commandé » le met en attente de réception.</li>
         <li><strong>⏰ Péremption</strong> : lots périmés ou bientôt périmés (alerte activable produit par produit).</li>
-        <li><strong>🧾 Commandes</strong> : intégrez vos commandes (à la main, en collant le mail du fournisseur, ou via la
+        <li><strong>🚚 Commandes</strong> : intégrez vos commandes (à la main, en collant le mail du fournisseur, ou via la
           passerelle Gmail). À la livraison, « 📷 Scanner la réception » : chaque scan valide une ligne et entre les boîtes en stock.
           Commande complète → on vous propose de l'archiver ; incomplète → elle passe en orange avec ses reliquats en haut.
           L'onglet « Dépenses & valeur » montre les dépenses par mois/année, la fourchette de prix par produit et la valeur du stock.</li>

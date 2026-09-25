@@ -80,6 +80,7 @@ input, select, textarea { font-family: inherit; font-size: 1rem; }
 }
 .nav-tab:hover { border-color: var(--accent); color: var(--accent); }
 .nav-tab.active { background: var(--accent); border-color: var(--accent); color: #fff; }
+.nav-badge[hidden] { display: none; }
 .nav-badge {
   position: absolute; top: -6px; right: -2px;
   min-width: 19px; height: 19px; padding: 0 5px; border-radius: 999px;
