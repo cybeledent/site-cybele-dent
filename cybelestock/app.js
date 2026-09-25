@@ -2187,7 +2187,7 @@
     const moneyAny = new RegExp(MONEY, "ig");
     const qtyCell = /^(?:[x×]\s*(\d{1,3})|(\d{1,3})\s*(?:u|x|×|pcs?|pi[èe]ces?|unit[ée]s?|unit[ée]\(s\)|bo[iî]tes?|cartons?)?\s*(?:gratuite\(s\)|gratuits?|offerts?)?\s*(?:\([^)]*\))?)$/i;
     const qtySuffix = /\s+×\s*(\d{1,3})(?!\s*(?:ml|cl|mm|cm|m|g|kg|l)\b)(?=\s|$)|\s+x\s*(\d{1,3})\s*$/i;
-    const qtyPrefix = /^(\d{1,3})\s*(?:unit[ée]\(s\)|unit[ée]s?|u|pcs?|pi[èe]ces?)\b/i;
+    const qtyPrefix = /^(\d{1,3})\s*(?:unit[ée]\(s\)|unit[ée]s?|u|pcs?|pi[èe]ces?)\b(?:\s*(?:gratuite\(s\)|gratuits?|offerts?))?\s*(?:\([^)]*\))?\s*$/i;
     const refCell = /^(?!\d+(?:[,.]\d+)?(?:mm|cm|ml|cl|g|kg|l|m|x)$)(?=[A-Z0-9\-\/._]*\d)[A-Z0-9][A-Z0-9\-\/._]{2,}$/i;
     const refLabel = /\[?\s*(?:r[ée]f(?:[ée]rence)?\.?|sku|code\s*article)\s*:?\s*(?=[A-Z0-9\-\/._]*\d)([A-Z0-9][A-Z0-9\-\/._]{2,})/i;
     const refOnly = /^\|?\s*\[?\s*(?:r[ée]f(?:[ée]rence)?\.?|sku|code\s*article)\s*:?\s*[A-Z0-9][A-Z0-9\-\/._]{2,}\s*\]?\s*\|?\s*$/i;
@@ -2299,8 +2299,8 @@
       const namePending = pending.map(cleanCell).filter(p => p && !isNoise(p) && !refLabel.test(p) && !/^option\s*:/i.test(p));
       let desig;
       if (namePending.length) {
-        desig = namePending[namePending.length - 1];
-        const variante = textCells.join(" ").trim();
+        desig = namePending[0];
+        const variante = namePending.slice(1).concat(textCells).join(" ").trim();
         if (variante && variante.length <= 40 && !refCell.test(variante) && !/^[x×]?\s*\d+\s*\]?$/i.test(variante) && !/[\[\]]/.test(variante)) desig += " — " + variante;
       } else desig = textCells.sort((a, b) => b.length - a.length)[0];
       if (desig && qty === 0) { const mm = qtyPrefix.exec(desig); if (mm) { qty = Number(mm[1]); desig = desig.replace(qtyPrefix, ""); } }
@@ -2338,7 +2338,7 @@
   function ressembleCommande(text, sujet) {
     const hay = (String(sujet || "") + "\n" + String(text || "")).toLowerCase();
     return /\b(commande|order|bon de commande|confirmation|facture|exp[ée]di[ée]e?|livraison)\b/.test(hay)
-      && (/(?:€\s*)?\d{1,4}[,.]\d{2}\s*(?:€|eur)/i.test(hay) || /\b\d{1,3}\s*unit[ée]/i.test(hay));
+      && (/(?:€\s*)?\d{1,4}[,.]\d{2}\s*(?:€|eur)/i.test(hay) || /\b\d{1,3}\s*unit[ée]/i.test(hay) || /(?:^|\s)[x×]\s?\d{1,3}(?:\s|$)/m.test(hay));
   }
 
   function openCollerMailModal() {
@@ -2448,6 +2448,9 @@
         const text = gmailBody(msg.payload);
         if (!ressembleCommande(text, sujet)) { state.mailsIgnores.push(id); continue; }
         const d = parseCommandeTexte(text, { mailId: id, sujet, from, date });
+        // Même n° qu'une commande déjà suivie (avis d'expédition, relance…) : on ignore
+        if (d.numero && state.commandesSuivi.some(c => c.numero && c.numero.toLowerCase() === d.numero.toLowerCase())) { state.mailsIgnores.push(id); continue; }
+        if (d.numero && drafts.some(x => x.numero && x.numero.toLowerCase() === d.numero.toLowerCase())) { state.mailsIgnores.push(id); continue; }
         d.mailFrom = from;
         drafts.push(d);
       }
