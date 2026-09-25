@@ -246,6 +246,9 @@
     s.commandesSuivi = Array.isArray(s.commandesSuivi) ? s.commandesSuivi : [];
     s.mailsIgnores = Array.isArray(s.mailsIgnores) ? s.mailsIgnores : [];
     s.gmail = (s.gmail && typeof s.gmail === "object") ? s.gmail : {};
+    // ID client OAuth du cabinet (public par nature) : pré-rempli pour éviter la saisie
+    if (!s.gmail.clientId) s.gmail.clientId = GMAIL_CLIENT_ID_DEFAUT;
+    if (!s.gmail.compte) s.gmail.compte = "cybeledent@gmail.com";
     s.commandesSuivi.forEach(c => {
       c.id = c.id || uid();
       c.numero = String(c.numero || "");
@@ -2205,6 +2208,7 @@
      Nécessite un « ID client OAuth » Google (⚙️ Réglages).
      ========================================================= */
   const GMAIL_SCOPE = "https://www.googleapis.com/auth/gmail.readonly";
+  const GMAIL_CLIENT_ID_DEFAUT = "398491776725-2thppp5q7medqis72hsahop1745q6sci.apps.googleusercontent.com";
   const GMAIL_QUERY_DEFAUT = 'newer_than:60d -in:spam -in:trash (commande OR "bon de commande" OR confirmation OR facture OR order OR expédiée OR expédition)';
   let gmailToken = null; // { token, exp }
 
