@@ -2180,12 +2180,15 @@
     const qtySuffix = /\s+×\s*(\d{1,3})(?!\s*(?:ml|cl|mm|cm|m|g|kg|l)\b)(?=\s|$)|\s+x\s*(\d{1,3})\s*$/i;
     const qtyPrefix = /^(\d{1,3})\s*(?:unit[ée]\(s\)|unit[ée]s?|u|pcs?|pi[èe]ces?)\b/i;
     const refCell = /^(?=[A-Z0-9\-\/._]*\d)[A-Z0-9][A-Z0-9\-\/._]{2,}$/i;
-    const refLabel = /\[?\s*r[ée]f(?:[ée]rence)?\.?\s*:?\s*(?=[A-Z0-9\-\/._]*\d)([A-Z0-9][A-Z0-9\-\/._]{2,})/i;
+    const refLabel = /\[?\s*(?:r[ée]f(?:[ée]rence)?\.?|sku|code\s*article)\s*:?\s*(?=[A-Z0-9\-\/._]*\d)([A-Z0-9][A-Z0-9\-\/._]{2,})/i;
+    const refOnly = /^\|?\s*\[?\s*(?:r[ée]f(?:[ée]rence)?\.?|sku|code\s*article)\s*:?\s*[A-Z0-9][A-Z0-9\-\/._]{2,}\s*\]?\s*\|?\s*$/i;
     const pctCell = /^\d{1,2}(?:[,.]\d+)?\s*%$/;
-    const stop = /(?<![a-z0-9])(sous[\s\-]?total|total|tva|t\.v\.a|taxes?|frais|port|exp[ée]dition|livraison|emballage|participation|remise|r[ée]duction|[ée]conomis[ée]|coupon|code\s*promo|montant|paiement|adresse|t[ée]l(?:[ée]phone)?|iban|siret|rpps|num[ée]ro\s*de\s*client)(?![a-z0-9])/i;
+    const stop = /(?<![a-z0-9])(sous[\s\-]?total|total|tva|t\.v\.a|taxes?|frais|port|exp[ée]dition|livraison|emballage|participation|remise|r[ée]duction|[ée]conomis[ée]|coupon|code\s*promo|montant|paiement|adresse|t[ée]l(?:[ée]phone)?|iban|siret|rpps|num[ée]ro\s*de\s*client|r[ée]sum[ée]|r[ée]capitulatif|d[ée]tail\s*de\s*(?:la\s*)?commande)(?![a-z0-9])/i;
     const header = /\b(produits?|articles?|d[ée]signation|description|r[ée]f[ée]rence|qt[ée]|quantit[ée]|prix|total)\b/ig;
     const lines = t.split("\n").map(s => s.trim());
     let pending = [];
+    let dernierSansPrix = null; // article « × N » dont le prix arrive sur une ligne suivante
+    let ignorerBloc = false;    // ligne de livraison / frais : on ignore ses lignes SKU et prix
 
     const cleanCell = (s) => s.replace(/\s{2,}/g, " ").replace(/^[\s\-–:.,|]+|[\s\-–:.,|]+$/g, "").trim();
     const isNoise = (s) => !s || s.length < 3 || /^\d+$/.test(s) || pctCell.test(s) || moneyCell.test(s) || stop.test(s) || /@|https?:\/\//i.test(s);
@@ -2202,14 +2205,37 @@
       }
       if (!ref) { const im = /\b(?=[A-Z0-9\-]{5,}\b)(?=[A-Z0-9\-]*\d)(?=[A-Z0-9\-]*[A-Z])([A-Z]+\d+[A-Z0-9]*|\d+[A-Z]+[A-Z0-9]*)\b/.exec(desig); if (im) ref = im[1]; }
       const l = { id: uid(), designation: desig.slice(0, 120), ref: cleanCell(ref || rawRef || "").split(/\s/)[0], produitId: null, refId: null, qty, prix, recu: 0 };
+      // Mémo pour la vérification par sous-total (prix brut = total de ligne ou prix unitaire ?)
+      if (prices.length === 1) { l._brut = prices[0]; l._ambigu = qty > 1; }
       lierLigneProduit(l, draft.fournisseurId);
       draft.lignes.push(l);
+      return l;
     }
+    const prixSeul = (t) => moneyCell.test(cleanCell(t)) ? toNum(cleanCell(t).replace(/[€]|eur\b/ig, "").trim()) : null;
 
     for (let i = 0; i < lines.length; i++) {
       const s = lines[i];
-      if (!s || /^[|\s]*$/.test(s)) { pending = []; continue; }
+      if (!s || /^[|\s]*$/.test(s)) { pending = []; ignorerBloc = false; continue; }
       if (/(?:^|[\s|(])-\s?\d+[,.]\d{2}/.test(s)) { pending = []; continue; } // remise (montant négatif)
+      // « SKU : XXX » seul sur sa ligne : référence de l'article précédent (ou du suivant), jamais un article
+      if (refOnly.test(s)) {
+        const rm = refLabel.exec(s);
+        if (!ignorerBloc && rm) { if (dernierSansPrix) dernierSansPrix.ref = rm[1]; else pending.push(s.replace(/^\|\s*/, "")); }
+        continue;
+      }
+      // « SKU : XXX | 15,00 € » : référence + prix de l'article « × N » précédent
+      if (dernierSansPrix && !ignorerBloc) {
+        const cellsR = s.split("|").map(c => c.trim()).filter(Boolean);
+        const pr = cellsR.map(prixSeul).filter(v => v != null);
+        const reste = cellsR.filter(c => prixSeul(c) == null).map(c => cleanCell(c.replace(refLabel, " "))).filter(Boolean);
+        if (pr.length === 1 && !reste.length) {
+          const rm = refLabel.exec(s); if (rm) dernierSansPrix.ref = rm[1];
+          dernierSansPrix.prix = Math.round(pr[0] / dernierSansPrix.qty * 100) / 100;
+          dernierSansPrix._brut = pr[0]; dernierSansPrix._ambigu = dernierSansPrix.qty > 1;
+          dernierSansPrix = null; pending = []; continue;
+        }
+      }
+      if (ignorerBloc && /^\|?\s*(?:€\s*)?\d/.test(s)) continue; // prix de la ligne de livraison ignorée
       const cells = s.split("|").map(c => c.trim()).filter(Boolean);
       const hdrHits = (s.replace(moneyAny, "").match(header) || []).length;
       if (hdrHits >= 2 && !moneyAny.test(s)) { moneyAny.lastIndex = 0; pending = []; continue; }
@@ -2243,6 +2269,7 @@
       // Ligne de total / TVA / port sans quantité ni référence : on l'ignore
       if (!qty && !ref && stop.test(others.join(" "))) { pending = []; continue; }
 
+      if (qty > 0 && !textCells.length && others.some(c => c && stop.test(c))) { ignorerBloc = true; dernierSansPrix = null; pending = []; continue; }
       const isItem = prices.length > 0 || (qty > 0 && (textCells.length || pending.length));
       if (!isItem) {
         // Ligne de texte simple : candidate « nom de produit » pour la ligne suivante
@@ -2264,9 +2291,27 @@
       if (namePending.length) desig = namePending[namePending.length - 1];
       else desig = textCells.sort((a, b) => b.length - a.length)[0];
       if (desig && qty === 0) { const mm = qtyPrefix.exec(desig); if (mm) { qty = Number(mm[1]); desig = desig.replace(qtyPrefix, ""); } }
-      pushItem(desig, ref, qty, prices);
+      const cree = pushItem(desig, ref, qty, prices);
+      dernierSansPrix = (cree && !prices.length) ? cree : null;
       pending = [];
     }
+
+    // Prix unitaire ou total de ligne ? Le sous-total du mail tranche quand c'est ambigu.
+    const ambigus = draft.lignes.filter(l => l._ambigu);
+    if (ambigus.length) {
+      const sousTotal = findTotal(["sous[\\s\\-]?total", "total\\s*h\\.?t", "montant\\s*total\\s*h\\.?t"]);
+      const port = draft.fraisPort || 0;
+      // Références possibles : sous-total (avec ou sans port), total (avec ou sans port)
+      const refs = [sousTotal, sousTotal - port, draft.total, draft.total - port].filter(v => v > 0);
+      if (refs.length) {
+        const base = draft.lignes.filter(l => !l._ambigu).reduce((t, l) => t + (l._brut != null ? l._brut : l.prix * l.qty), 0);
+        const hypTotal = base + ambigus.reduce((t, l) => t + l._brut, 0);        // prix brut = total de ligne
+        const hypUnit = base + ambigus.reduce((t, l) => t + l._brut * l.qty, 0);  // prix brut = prix unitaire
+        const meilleur = (h) => Math.min(...refs.map(r => Math.abs(h - r) / r));
+        if (meilleur(hypUnit) < meilleur(hypTotal) && meilleur(hypUnit) < 0.1) ambigus.forEach(l => { l.prix = l._brut; });
+      }
+    }
+    draft.lignes.forEach(l => { delete l._brut; delete l._ambigu; });
 
     // Dédoublonnage (même désignation + même prix) et plafond
     const seen = new Set();
