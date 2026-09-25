@@ -1974,20 +1974,21 @@
     s = s.replace(/<!--[\s\S]*?-->/g, " ");
     // Les retours à la ligne du code HTML ne comptent pas : seules les balises structurent le texte
     s = s.replace(/\s+/g, " ");
-    s = s.replace(/<br\s*\/?>/gi, "\n").replace(/<\/(p|div|li|h\d|tr|table|thead|tbody)>/gi, "\n");
+    s = s.replace(/<br\s*\/?>/gi, "\n").replace(/<\/(p|div|li|h\d|tr|table|thead|tbody)>/gi, "\n").replace(/<tr\b/gi, "\n<tr");
     s = s.replace(/<\/t[dh]>/gi, " | ");
     s = s.replace(/<[^>]+>/g, " ");
     const t = document.createElement("textarea"); t.innerHTML = s; s = t.value;
     return s.replace(/[ \t ]+/g, " ").replace(/ *\n */g, "\n").replace(/\n{2,}/g, "\n").trim();
   }
-  function parseDateFr(s) {
+  function parseDateFr(s, anneeDefaut) {
     let m = /(\d{1,2})[\/.\-](\d{1,2})[\/.\-](\d{4})/.exec(s);
     if (m) return `${m[3]}-${m[2].padStart(2, "0")}-${m[1].padStart(2, "0")}`;
     m = /(\d{4})-(\d{2})-(\d{2})/.exec(s);
     if (m) return m[0];
     const mois = ["jan", "fev", "mar", "avr", "mai", "juin", "juil", "aou", "sep", "oct", "nov", "dec"];
-    m = /(\d{1,2})(?:er)?\s+([a-zéûô]+)\.?\s+(\d{4})/i.exec(s);
+    m = /(\d{1,2})(?:er)?\s+([a-zéûô]+)\.?(?:\s+(\d{4}))?/i.exec(s);
     if (m) {
+      if (!m[3]) { if (!anneeDefaut) return null; m[3] = String(anneeDefaut); }
       const mo = m[2].toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "").replace(/^fevr/, "fev").replace(/^juill/, "juil");
       const i = mois.findIndex(x => mo.startsWith(x) && !(x === "juin" && mo.startsWith("juil")) && !(x === "mar" && mo.startsWith("mai")));
       if (i >= 0) return `${m[3]}-${String(i + 1).padStart(2, "0")}-${m[1].padStart(2, "0")}`;
@@ -2038,20 +2039,22 @@
     const draft = { source: meta.mailId ? "mail" : "manuel", mailId: meta.mailId || null, mailSujet: meta.sujet || "", lignes: [] };
 
     /* ---- N° de commande : le jeton doit contenir un chiffre ---- */
-    const numRe = /(?:n[°oº]\s*(?:de\s*)?commande|num[ée]ro\s*de\s*(?:la\s*)?commande|r[ée]f[ée]rence\s*(?:de\s*(?:la\s*)?)?commande|order\s*(?:number|n[°o]\.?|#)?|(?:votre\s*)?commande(?:\s*(?:num[ée]ro|n[°oº]\.?))?)\s*[:#\-]*\s*#?\s*(?=[A-Z0-9\-\/_.]*\d)([A-Z0-9][A-Z0-9\-\/_.]{3,})/i;
+    const numRe = /(?:n[°oº]\s*(?:de\s*)?commande|num[ée]ro\s*de\s*(?:la\s*)?commande|r[ée]f[ée]rence\s*(?:de\s*(?:la\s*)?)?commande|order\s*(?:number|n[°o]\.?|#)?|(?:votre\s*)?commande(?:\s*(?:num[ée]ro|n[°oº]\.?))?)[\s|:#\-]*#?\s*(?=[A-Z0-9\-\/_.]*\d)([A-Z0-9][A-Z0-9\-\/_.]{3,})/i;
     let m = numRe.exec(t) || numRe.exec(meta.sujet || "");
     if (m) draft.numero = m[1].replace(/[.,;:]+$/, "");
 
     /* ---- Date : « passée le … », « du … », « Le 25 sept. 2026 », sinon date du mail ---- */
-    const dm = /(?:date\s*(?:de\s*(?:la\s*)?commande)?|command[ée]e?\s*le|pass[ée]e\s*le|\bdu|^\s*le)\s*[:\-]?\s*(\d{1,2}(?:[\/.\-]\d{1,2}[\/.\-]\d{4}|(?:er)?\s+[a-zéû]+\.?\s+\d{4}))/im.exec(t);
-    draft.date = (dm && parseDateFr(dm[1])) || (meta.date ? localIso(new Date(meta.date)) : null) || todayIso();
+    const anneeMail = meta.date && !isNaN(new Date(meta.date)) ? new Date(meta.date).getFullYear() : new Date().getFullYear();
+    const dm = /(?:date\s*(?:de\s*(?:la\s*)?commande)?|command[ée]e?\s*le|pass[ée]e\s*le|\bdu|^\s*le)[\s|:\-]*(?:(?:lundi|mardi|mercredi|jeudi|vendredi|samedi|dimanche)\s+)?(\d{1,2}(?:[\/.\-]\d{1,2}[\/.\-]\d{4}|(?:er)?\s+[a-zéû]+\.?(?:\s+\d{4})?))/im.exec(t);
+    draft.date = (dm && parseDateFr(dm[1], anneeMail)) || (meta.date ? localIso(new Date(meta.date)) : null) || todayIso();
 
     /* ---- Montants ---- */
     const MONEY = "(?:€\\s*)?(\\d{1,3}(?:[ .]\\d{3})+(?:[,.]\\d{2})|\\d+[,.]\\d{2})\\s*(?:€|eur\\b)?";
     const toNum = (s) => parsePrix(String(s).replace(/[ .](?=\d{3}\b)/g, "").replace(",", "."));
     const findTotal = (labels) => {
       for (const lab of labels) {
-        const re = new RegExp("(?<![a-zé\\-])" + lab + "[^\\d€]{0,40}?" + MONEY, "ig");
+        const re = new RegExp("(?<![a-zé\\-])" + lab + "(?:[^\\d€\\n]{0,40}?|[^\\d€\\n]{0,40}?\\n\\s*\\|?\\s*)" + MONEY, "ig");
+        if (new RegExp("(?<![a-zé\\-])" + lab + "[^\\d€\\n]{0,40}?\\b(?:offert|gratuit)", "i").test(t)) return 0;
         let last = null, mm; while ((mm = re.exec(t))) last = mm[1];
         if (last !== null) return toNum(last);
       }
@@ -2077,12 +2080,12 @@
     const moneyCell = new RegExp("^" + MONEY + "$", "i");
     const moneyAny = new RegExp(MONEY, "ig");
     const qtyCell = /^(\d{1,3})\s*(?:u|x|×|pcs?|pi[èe]ces?|unit[ée]s?|unit[ée]\(s\)|bo[iî]tes?|cartons?)?\s*(?:gratuite\(s\)|gratuits?|offerts?)?\s*(?:\([^)]*\))?$/i;
-    const qtySuffix = /\s*[×x]\s*(\d{1,3})\s*$/i;
+    const qtySuffix = /\s+×\s*(\d{1,3})(?!\s*(?:ml|cl|mm|cm|m|g|kg|l)\b)(?=\s|$)|\s+x\s*(\d{1,3})\s*$/i;
     const qtyPrefix = /^(\d{1,3})\s*(?:unit[ée]\(s\)|unit[ée]s?|u|pcs?|pi[èe]ces?)\b/i;
     const refCell = /^(?=[A-Z0-9\-\/._]*\d)[A-Z0-9][A-Z0-9\-\/._]{2,}$/i;
     const refLabel = /\[?\s*r[ée]f(?:[ée]rence)?\.?\s*:?\s*(?=[A-Z0-9\-\/._]*\d)([A-Z0-9][A-Z0-9\-\/._]{2,})/i;
     const pctCell = /^\d{1,2}(?:[,.]\d+)?\s*%$/;
-    const stop = /\b(sous[\s\-]?total|total|tva|t\.v\.a|taxes?|frais|port|exp[ée]dition|livraison|emballage|participation|remise|montant|paiement|adresse|t[ée]l(?:[ée]phone)?|iban|siret|rpps|num[ée]ro\s*de\s*client)\b/i;
+    const stop = /(?<![a-z0-9])(sous[\s\-]?total|total|tva|t\.v\.a|taxes?|frais|port|exp[ée]dition|livraison|emballage|participation|remise|r[ée]duction|[ée]conomis[ée]|coupon|code\s*promo|montant|paiement|adresse|t[ée]l(?:[ée]phone)?|iban|siret|rpps|num[ée]ro\s*de\s*client)(?![a-z0-9])/i;
     const header = /\b(produits?|articles?|d[ée]signation|description|r[ée]f[ée]rence|qt[ée]|quantit[ée]|prix|total)\b/ig;
     const lines = t.split("\n").map(s => s.trim());
     let pending = [];
@@ -2100,6 +2103,7 @@
         const unit = prices.find(p => p !== last && Math.abs(p * qty - last) < 0.02);
         prix = unit != null ? unit : Math.round(last / qty * 100) / 100;
       }
+      if (!ref) { const im = /\b(?=[A-Z0-9\-]{5,}\b)(?=[A-Z0-9\-]*\d)(?=[A-Z0-9\-]*[A-Z])([A-Z]+\d+[A-Z0-9]*|\d+[A-Z]+[A-Z0-9]*)\b/.exec(desig); if (im) ref = im[1]; }
       const l = { id: uid(), designation: desig.slice(0, 120), ref: cleanCell(ref || rawRef || "").split(/\s/)[0], produitId: null, refId: null, qty, prix, recu: 0 };
       lierLigneProduit(l, draft.fournisseurId);
       draft.lignes.push(l);
@@ -2108,6 +2112,7 @@
     for (let i = 0; i < lines.length; i++) {
       const s = lines[i];
       if (!s || /^[|\s]*$/.test(s)) { pending = []; continue; }
+      if (/(?:^|[\s|(])-\s?\d+[,.]\d{2}/.test(s)) { pending = []; continue; } // remise (montant négatif)
       const cells = s.split("|").map(c => c.trim()).filter(Boolean);
       const hdrHits = (s.replace(moneyAny, "").match(header) || []).length;
       if (hdrHits >= 2 && !moneyAny.test(s)) { moneyAny.lastIndex = 0; pending = []; continue; }
@@ -2129,7 +2134,7 @@
       // Quantité en suffixe « × 3 » ou en préfixe « 2 unité(s) »
       others.forEach((c, k) => {
         let mm = qtySuffix.exec(c);
-        if (mm && !qty) { qty = Number(mm[1]); others[k] = c.replace(qtySuffix, ""); return; }
+        if (mm && !qty) { qty = Number(mm[1] || mm[2]); others[k] = c.replace(qtySuffix, " "); return; }
         mm = qtyPrefix.exec(c);
         if (mm && !qty && !prices.length) { qty = Number(mm[1]); others[k] = ""; }
       });
@@ -2138,6 +2143,8 @@
       if (refM) ref = refM[1];
       others.forEach((c, k) => { others[k] = cleanCell(c.replace(refLabel, " ")); });
       const textCells = others.filter(c => c && !isNoise(c));
+      // Ligne de total / TVA / port sans quantité ni référence : on l'ignore
+      if (!qty && !ref && stop.test(others.join(" "))) { pending = []; continue; }
 
       const isItem = prices.length > 0 || (qty > 0 && (textCells.length || pending.length));
       if (!isItem) {
