@@ -1871,6 +1871,7 @@
         <div class="field"><label>Frais de port (€)</label><input id="cm-port" inputmode="decimal" value="${c.fraisPort ? String(c.fraisPort).replace(".", ",") : ""}"></div>
       </div>
       <div class="section-label" style="margin-top:14px">Articles</div>
+      ${draft ? '<div class="field-hint" style="margin:-4px 0 8px">Prix unitaires tels qu\'indiqués dans le mail (HT ou TTC selon le fournisseur). Vérifiez les quantités et le produit du stock associé à chaque ligne.</div>' : ""}
       <div id="cm-lines"></div>
       <button class="btn btn-sm" id="cm-add-line" style="margin-top:8px">＋ Ajouter un article</button>
       <div class="field full" style="margin-top:12px"><label>Note</label><input id="cm-note" value="${esc(c.note || "")}" placeholder="facultatif"></div>
@@ -1958,6 +1959,8 @@
       toast(existing ? "Commande enregistrée." : "Commande intégrée au suivi.");
     };
   }
+  const MOTS_GENERIQUES = new Set(["taille", "boite", "boites", "carton", "cartons", "sachet", "sachets", "paquet", "lot", "pour", "avec", "sans", "des", "les",
+    "une", "conditionnement", "vente", "couleur", "dimension", "unite", "unites", "pcs", "piece", "pieces", "flacon", "tube", "kit", "set", "type", "modele", "option", "ref", "reference"]);
   function normRef(r) { return String(r || "").toUpperCase().replace(/[^A-Z0-9]/g, ""); }
 
   /* =========================================================
@@ -1967,8 +1970,11 @@
      ========================================================= */
   function htmlToText(html) {
     let s = String(html || "");
-    s = s.replace(/<(script|style)[\s\S]*?<\/\1>/gi, " ");
-    s = s.replace(/<br\s*\/?>/gi, "\n").replace(/<\/(p|div|li|h\d|tr|table)>/gi, "\n");
+    s = s.replace(/<(script|style|head)[\s\S]*?<\/\1>/gi, " ");
+    s = s.replace(/<!--[\s\S]*?-->/g, " ");
+    // Les retours à la ligne du code HTML ne comptent pas : seules les balises structurent le texte
+    s = s.replace(/\s+/g, " ");
+    s = s.replace(/<br\s*\/?>/gi, "\n").replace(/<\/(p|div|li|h\d|tr|table|thead|tbody)>/gi, "\n");
     s = s.replace(/<\/t[dh]>/gi, " | ");
     s = s.replace(/<[^>]+>/g, " ");
     const t = document.createElement("textarea"); t.innerHTML = s; s = t.value;
@@ -1979,9 +1985,13 @@
     if (m) return `${m[3]}-${m[2].padStart(2, "0")}-${m[1].padStart(2, "0")}`;
     m = /(\d{4})-(\d{2})-(\d{2})/.exec(s);
     if (m) return m[0];
-    const mois = ["janvier", "février", "mars", "avril", "mai", "juin", "juillet", "août", "septembre", "octobre", "novembre", "décembre"];
-    m = /(\d{1,2})(?:er)?\s+([a-zéû]+)\s+(\d{4})/i.exec(s);
-    if (m) { const i = mois.indexOf(m[2].toLowerCase()); if (i >= 0) return `${m[3]}-${String(i + 1).padStart(2, "0")}-${m[1].padStart(2, "0")}`; }
+    const mois = ["jan", "fev", "mar", "avr", "mai", "juin", "juil", "aou", "sep", "oct", "nov", "dec"];
+    m = /(\d{1,2})(?:er)?\s+([a-zéûô]+)\.?\s+(\d{4})/i.exec(s);
+    if (m) {
+      const mo = m[2].toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "").replace(/^fevr/, "fev").replace(/^juill/, "juil");
+      const i = mois.findIndex(x => mo.startsWith(x) && !(x === "juin" && mo.startsWith("juil")) && !(x === "mar" && mo.startsWith("mai")));
+      if (i >= 0) return `${m[3]}-${String(i + 1).padStart(2, "0")}-${m[1].padStart(2, "0")}`;
+    }
     return null;
   }
   function devinerFournisseur(text, from) {
@@ -2007,7 +2017,7 @@
       }
     }
     const tokens = (l.designation || "").toLowerCase().normalize("NFD").replace(/[̀-ͯ]/g, "")
-      .split(/[^a-z0-9]+/).filter(t => t.length >= 3);
+      .split(/[^a-z0-9]+/).filter(t => t.length >= 3 && !MOTS_GENERIQUES.has(t));
     if (tokens.length < 2) return;
     let best = null;
     state.produits.forEach(p => {
@@ -2016,7 +2026,7 @@
       const score = tokens.filter(t => hay.includes(t)).length;
       if (score >= 2 && (!best || score > best.score)) best = { p, score };
     });
-    if (best && best.score >= Math.max(2, Math.ceil(tokens.length * 0.5))) {
+    if (best && best.score >= Math.max(2, Math.ceil(tokens.length * 0.6))) {
       l.produitId = best.p.id;
       const r = best.p.references.find(x => fournisseurId && x.fournisseurId === fournisseurId) || null;
       l.refId = r ? r.id : null;
@@ -2024,72 +2034,145 @@
   }
   function parseCommandeTexte(text, meta) {
     meta = meta || {};
-    const t = String(text || "");
+    const t = String(text || "").replace(/ /g, " ");
     const draft = { source: meta.mailId ? "mail" : "manuel", mailId: meta.mailId || null, mailSujet: meta.sujet || "", lignes: [] };
-    // N° de commande
-    const numRe = /(?:n[°oº]\s*(?:de\s*)?commande|commande\s*n[°oº]?\.?|num[ée]ro\s*de\s*commande|r[ée]f[ée]rence\s*(?:de\s*(?:la\s*)?)?commande|order\s*(?:number|n[°o]\.?|#)|votre\s*commande)\s*[:#\-]?\s*([A-Z0-9][A-Z0-9\-\/_.]{3,})/i;
+
+    /* ---- N° de commande : le jeton doit contenir un chiffre ---- */
+    const numRe = /(?:n[°oº]\s*(?:de\s*)?commande|num[ée]ro\s*de\s*(?:la\s*)?commande|r[ée]f[ée]rence\s*(?:de\s*(?:la\s*)?)?commande|order\s*(?:number|n[°o]\.?|#)?|(?:votre\s*)?commande(?:\s*(?:num[ée]ro|n[°oº]\.?))?)\s*[:#\-]*\s*#?\s*(?=[A-Z0-9\-\/_.]*\d)([A-Z0-9][A-Z0-9\-\/_.]{3,})/i;
     let m = numRe.exec(t) || numRe.exec(meta.sujet || "");
-    if (m) draft.numero = m[1].replace(/[.,;:]$/, "");
-    // Date
-    const dm = /(?:date\s*(?:de\s*(?:la\s*)?commande)?|command[ée]e?\s*le|pass[ée]e\s*le)\s*[:\-]?\s*([^\n]{6,30})/i.exec(t);
-    draft.date = (dm && parseDateFr(dm[1])) || (meta.date ? localIso(new Date(meta.date)) : null) || parseDateFr(t) || todayIso();
-    // Totaux
-    const money = "(\\d{1,3}(?:[ \\u00a0.]?\\d{3})*(?:[,.]\\d{2})?)\\s*(?:€|eur)";
-    const totRe = new RegExp("total\\s*(?:ttc|t\\.t\\.c\\.?|de\\s*la\\s*commande|commande|g[ée]n[ée]ral)?\\s*(?:\\(.*?\\))?\\s*[:\\-]?\\s*" + money, "i");
-    const totTtc = new RegExp("total\\s*(?:ttc|t\\.t\\.c\\.?)[^\\d\\n]{0,25}" + money, "i");
-    m = totTtc.exec(t) || totRe.exec(t);
-    if (m) draft.total = parsePrix(m[1].replace(/[  .](?=\d{3})/g, ""));
-    m = new RegExp("(?:frais\\s*de\\s*port|livraison|port|shipping)[^\\d\\n]{0,25}" + money, "i").exec(t);
-    if (m) draft.fraisPort = parsePrix(m[1].replace(/[  .](?=\d{3})/g, ""));
-    // Fournisseur
+    if (m) draft.numero = m[1].replace(/[.,;:]+$/, "");
+
+    /* ---- Date : « passée le … », « du … », « Le 25 sept. 2026 », sinon date du mail ---- */
+    const dm = /(?:date\s*(?:de\s*(?:la\s*)?commande)?|command[ée]e?\s*le|pass[ée]e\s*le|\bdu|^\s*le)\s*[:\-]?\s*(\d{1,2}(?:[\/.\-]\d{1,2}[\/.\-]\d{4}|(?:er)?\s+[a-zéû]+\.?\s+\d{4}))/im.exec(t);
+    draft.date = (dm && parseDateFr(dm[1])) || (meta.date ? localIso(new Date(meta.date)) : null) || todayIso();
+
+    /* ---- Montants ---- */
+    const MONEY = "(?:€\\s*)?(\\d{1,3}(?:[ .]\\d{3})+(?:[,.]\\d{2})|\\d+[,.]\\d{2})\\s*(?:€|eur\\b)?";
+    const toNum = (s) => parsePrix(String(s).replace(/[ .](?=\d{3}\b)/g, "").replace(",", "."));
+    const findTotal = (labels) => {
+      for (const lab of labels) {
+        const re = new RegExp("(?<![a-zé\\-])" + lab + "[^\\d€]{0,40}?" + MONEY, "ig");
+        let last = null, mm; while ((mm = re.exec(t))) last = mm[1];
+        if (last !== null) return toNum(last);
+      }
+      return 0;
+    };
+    draft.total = findTotal(["total\\s*(?:à|a)\\s*payer", "montant\\s*total", "total\\s*de\\s*la\\s*commande", "total\\s*ttc", "total\\s*g[ée]n[ée]ral", "(?<!sous[ \\-]?)total(?!\\s*h\\.?t)"]);
+    draft.fraisPort = findTotal(["(?<!hors\\s{0,3})frais\\s*de\\s*port(?![^\\n]{0,10}\\])[^\\n]{0,40}?", "participation[^\\n]{0,60}?(?:port|exp[ée]dition|emballage)[^\\n]{0,20}?", "exp[ée]dition", "livraison", "shipping", "\\bport\\b"]);
+
+    /* ---- Fournisseur ---- */
     const f = devinerFournisseur(t, meta.from);
     if (f) draft.fournisseurId = f.id;
-    else if (meta.from) { const nm = /^"?([^"<@]+)"?\s*</.exec(meta.from); draft.fournisseurNom = nm ? nm[1].trim() : meta.from.replace(/<.*>/, "").trim(); }
-    // Lignes d'articles : une ligne de texte avec au moins un prix et une petite quantité
-    const prixRe = /(\d{1,4}(?:[,.]\d{2}))\s*(?:€|eur)?/gi;
-    const refTok = /\b([A-Z]{0,4}[\-.]?\d{3,}[A-Z0-9\-\/.]*)\b/g;
-    const stop = /\b(total|sous[- ]total|tva|t\.v\.a|frais|port|livraison|remise|montant|paiement|adresse|t[ée]l[ée]phone|iban|siret)\b/i;
-    t.split("\n").forEach(line => {
-      const s = line.trim();
-      if (s.length < 6 || stop.test(s)) return;
-      const prices = []; let pm;
-      prixRe.lastIndex = 0;
-      while ((pm = prixRe.exec(s))) prices.push(parsePrix(pm[1]));
-      if (!prices.length) return;
-      // Quantité : petit entier isolé (cellule « 2 », « x2 », « qté 2 »)
-      let qty = 1, qtyTok = "";
-      const sansPrix = s.replace(prixRe, " ");
-      // 1) cellule de tableau isolée « | 4 | » ; 2) « qté : 4 » ; 3) « 4 x » / « x 4 » (pas « 40x40 »)
-      const qm = /(?:^|\|)\s*(\d{1,3})\s*(?=\||$)/.exec(sansPrix)
-        || /(?:qt[ée]\.?|quantit[ée])\s*[:\-]?\s*(\d{1,3})\b/i.exec(sansPrix)
-        || /(?:^|[\s|])(\d{1,3})\s*(?:x|×)(?![\d.,])/i.exec(sansPrix)
-        || /(?:^|[\s|])(?:x|×)\s*(\d{1,3})(?![\d.,x×])/i.exec(sansPrix)
-        || /(?:^|[\s|])(\d{1,3})\s+(?:pcs?|pi[èe]ces?|unit[ée]s?)\b/i.exec(sansPrix);
-      if (qm) { qty = Math.max(1, Number(qm[1])); qtyTok = qm[0]; }
-      // Référence : jeton alphanumérique avec ≥ 3 chiffres, hors prix
-      let ref = ""; let rm;
-      refTok.lastIndex = 0;
-      while ((rm = refTok.exec(s))) { const tok = rm[1]; if (!/^\d{1,4}[,.]\d{2}$/.test(tok) && (tok.replace(/\D/g, "").length >= 3)) { ref = tok; break; } }
-      // Prix unitaire : si plusieurs prix, le plus petit ; désignation = reste
-      const prixU = prices.length > 1 ? Math.min(...prices) : prices[0];
-      let desig = sansPrix.replace(/€|eur\b/gi, " ");
-      if (ref) desig = desig.replace(ref, " ");
-      if (qtyTok) desig = desig.replace(qtyTok, qtyTok.replace(/\d+/, " ").replace(/[x×]/i, " "));
-      desig = desig.replace(/\|/g, " ").replace(/\b(qt[ée]\.?|quantit[ée])\s*[:\-]?\s*\d{0,3}\b/gi, " ")
-        .replace(/\s{2,}/g, " ").replace(/^[\s\-–:.,]+|[\s\-–:.,x×]+$/gi, "").trim();
-      if (desig.length < 3 || /^\d+$/.test(desig)) return;
-      const l = { id: uid(), designation: desig.slice(0, 120), ref, produitId: null, refId: null, qty, prix: prixU, recu: 0 };
+    else if (meta.from) {
+      const nm = /^"?([^"<@]+?)"?\s*</.exec(meta.from);
+      const dom = /@(?:[a-z0-9-]+\.)*?([a-z0-9-]+)\.[a-z]{2,}/i.exec(meta.from);
+      draft.fournisseurNom = nm ? nm[1].trim() : (dom ? dom[1].charAt(0).toUpperCase() + dom[1].slice(1) : meta.from.trim());
+    }
+
+    /* ---- Articles : lecture bloc par bloc ----
+       Une « ligne d'article » = une ligne contenant un prix (ou une quantité
+       « × 2 » / « 2 unité(s) »). Les lignes de texte juste avant (nom du
+       produit, « Réf : … ») complètent la ligne. Les cellules de tableau
+       sont séparées par « | ». */
+    const moneyCell = new RegExp("^" + MONEY + "$", "i");
+    const moneyAny = new RegExp(MONEY, "ig");
+    const qtyCell = /^(\d{1,3})\s*(?:u|x|×|pcs?|pi[èe]ces?|unit[ée]s?|unit[ée]\(s\)|bo[iî]tes?|cartons?)?\s*(?:gratuite\(s\)|gratuits?|offerts?)?\s*(?:\([^)]*\))?$/i;
+    const qtySuffix = /\s*[×x]\s*(\d{1,3})\s*$/i;
+    const qtyPrefix = /^(\d{1,3})\s*(?:unit[ée]\(s\)|unit[ée]s?|u|pcs?|pi[èe]ces?)\b/i;
+    const refCell = /^(?=[A-Z0-9\-\/._]*\d)[A-Z0-9][A-Z0-9\-\/._]{2,}$/i;
+    const refLabel = /\[?\s*r[ée]f(?:[ée]rence)?\.?\s*:?\s*(?=[A-Z0-9\-\/._]*\d)([A-Z0-9][A-Z0-9\-\/._]{2,})/i;
+    const pctCell = /^\d{1,2}(?:[,.]\d+)?\s*%$/;
+    const stop = /\b(sous[\s\-]?total|total|tva|t\.v\.a|taxes?|frais|port|exp[ée]dition|livraison|emballage|participation|remise|montant|paiement|adresse|t[ée]l(?:[ée]phone)?|iban|siret|rpps|num[ée]ro\s*de\s*client)\b/i;
+    const header = /\b(produits?|articles?|d[ée]signation|description|r[ée]f[ée]rence|qt[ée]|quantit[ée]|prix|total)\b/ig;
+    const lines = t.split("\n").map(s => s.trim());
+    let pending = [];
+
+    const cleanCell = (s) => s.replace(/\s{2,}/g, " ").replace(/^[\s\-–:.,|]+|[\s\-–:.,|]+$/g, "").trim();
+    const isNoise = (s) => !s || s.length < 3 || /^\d+$/.test(s) || pctCell.test(s) || moneyCell.test(s) || stop.test(s) || /@|https?:\/\//i.test(s);
+
+    function pushItem(desig, ref, qty, prices, rawRef) {
+      desig = cleanCell(desig || "");
+      if (isNoise(desig)) return;
+      qty = Math.max(1, qty || 1);
+      let prix = 0;
+      if (prices.length) {
+        const last = prices[prices.length - 1];
+        const unit = prices.find(p => p !== last && Math.abs(p * qty - last) < 0.02);
+        prix = unit != null ? unit : Math.round(last / qty * 100) / 100;
+      }
+      const l = { id: uid(), designation: desig.slice(0, 120), ref: cleanCell(ref || rawRef || "").split(/\s/)[0], produitId: null, refId: null, qty, prix, recu: 0 };
       lierLigneProduit(l, draft.fournisseurId);
       draft.lignes.push(l);
-    });
-    // Dédoublonnage grossier (même désignation + même prix)
+    }
+
+    for (let i = 0; i < lines.length; i++) {
+      const s = lines[i];
+      if (!s || /^[|\s]*$/.test(s)) { pending = []; continue; }
+      const cells = s.split("|").map(c => c.trim()).filter(Boolean);
+      const hdrHits = (s.replace(moneyAny, "").match(header) || []).length;
+      if (hdrHits >= 2 && !moneyAny.test(s)) { moneyAny.lastIndex = 0; pending = []; continue; }
+      moneyAny.lastIndex = 0;
+
+      const prices = [], others = [];
+      let qty = 0, ref = "";
+      cells.forEach(c => {
+        if (moneyCell.test(c)) prices.push(toNum(c.replace(/[€]|eur\b/ig, "").trim()));
+        else if (pctCell.test(c)) return;
+        else if (qtyCell.test(c) && !qty) qty = Number(qtyCell.exec(c)[1]);
+        else if (refCell.test(c) && !/^\d{1,3}$/.test(c)) ref = c;
+        else others.push(c);
+      });
+      // Prix collés dans une cellule de texte (« … 2 x 5,95 € »)
+      if (!prices.length) {
+        others.forEach((c, k) => { let mm; const re = new RegExp(MONEY, "ig"); while ((mm = re.exec(c))) prices.push(toNum(mm[1])); if (prices.length) others[k] = c.replace(re, " "); });
+      }
+      // Quantité en suffixe « × 3 » ou en préfixe « 2 unité(s) »
+      others.forEach((c, k) => {
+        let mm = qtySuffix.exec(c);
+        if (mm && !qty) { qty = Number(mm[1]); others[k] = c.replace(qtySuffix, ""); return; }
+        mm = qtyPrefix.exec(c);
+        if (mm && !qty && !prices.length) { qty = Number(mm[1]); others[k] = ""; }
+      });
+      // Référence explicite « Réf : 123-456 » dans la ligne ou juste avant
+      const refM = refLabel.exec(s) || pending.map(p => refLabel.exec(p)).find(Boolean);
+      if (refM) ref = refM[1];
+      others.forEach((c, k) => { others[k] = cleanCell(c.replace(refLabel, " ")); });
+      const textCells = others.filter(c => c && !isNoise(c));
+
+      const isItem = prices.length > 0 || (qty > 0 && (textCells.length || pending.length));
+      if (!isItem) {
+        // Ligne de texte simple : candidate « nom de produit » pour la ligne suivante
+        if (/^\|/.test(s)) pending = []; // début d'une nouvelle ligne de tableau
+        if (!stop.test(s) && !/@|https?:\/\//i.test(s)) { pending.push(s.replace(/^\|\s*/, "")); if (pending.length > 3) pending.shift(); }
+        else pending = [];
+        continue;
+      }
+      // Prix seul sur la ligne suivante (« … × 1 » puis « €314,17 »)
+      if (!prices.length && qty > 0 && lines[i + 1] && moneyCell.test(cleanCell(lines[i + 1]))) {
+        prices.push(toNum(cleanCell(lines[i + 1]).replace(/[€]|eur\b/ig, "").trim())); i++;
+      }
+      // Ligne « total / port / tva » : on ignore
+      const rowText = textCells.join(" ");
+      if (!textCells.length && !pending.length) continue;
+      if (textCells.length && !pending.length && stop.test(rowText)) continue;
+      const namePending = pending.map(cleanCell).filter(p => p && !isNoise(p) && !refLabel.test(p) && !/^option\s*:/i.test(p));
+      let desig;
+      if (namePending.length) desig = namePending[namePending.length - 1];
+      else desig = textCells.sort((a, b) => b.length - a.length)[0];
+      if (desig && qty === 0) { const mm = qtyPrefix.exec(desig); if (mm) { qty = Number(mm[1]); desig = desig.replace(qtyPrefix, ""); } }
+      pushItem(desig, ref, qty, prices);
+      pending = [];
+    }
+
+    // Dédoublonnage (même désignation + même prix) et plafond
     const seen = new Set();
-    draft.lignes = draft.lignes.filter(l => { const k = l.designation.toLowerCase() + "|" + l.prix; if (seen.has(k)) return false; seen.add(k); return true; }).slice(0, 60);
+    draft.lignes = draft.lignes.filter(l => { const k = l.designation.toLowerCase() + "|" + l.prix; if (seen.has(k)) return false; seen.add(k); return true; }).slice(0, 80);
     return draft;
   }
   function ressembleCommande(text, sujet) {
     const hay = (String(sujet || "") + "\n" + String(text || "")).toLowerCase();
-    return /\b(commande|order|bon de commande|confirmation|facture|exp[ée]di[ée]e?|livraison)\b/.test(hay) && /\d{1,4}[,.]\d{2}\s*(?:€|eur)/i.test(hay);
+    return /\b(commande|order|bon de commande|confirmation|facture|exp[ée]di[ée]e?|livraison)\b/.test(hay)
+      && (/(?:€\s*)?\d{1,4}[,.]\d{2}\s*(?:€|eur)/i.test(hay) || /\b\d{1,3}\s*unit[ée]/i.test(hay));
   }
 
   function openCollerMailModal() {
@@ -2689,5 +2772,7 @@
     render();
     setTimeout(gmailVerifQuotidienne, 800);
   }
+  // Outils de test (aperçu local uniquement)
+  if (/^(localhost|127\.)/.test(location.hostname)) window.CybeleStockDebug = { parseCommandeTexte, htmlToText };
   init();
 })();
