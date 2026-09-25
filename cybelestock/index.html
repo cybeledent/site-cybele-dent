@@ -16,8 +16,8 @@
   <meta name="apple-mobile-web-app-title" content="CybèleStock">
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Poppins:wght@500;600;700&display=swap" rel="stylesheet">
-  <link rel="stylesheet" href="app.css?v=6">
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Plus+Jakarta+Sans:wght@600;700;800&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="app.css?v=8">
 </head>
 <body>
 
@@ -25,28 +25,29 @@
   <header class="app-header">
     <div class="app-header-inner">
       <a class="brand" href="#" id="brand-home">
-        <span class="brand-mark">📦</span>
+        <span class="brand-mark" data-ico="box" data-size="22"></span>
         <span class="brand-text">Cybèle<strong>Stock</strong></span>
       </a>
+      <!-- Navigation principale (pastilles en haut sur ordinateur, barre en bas sur téléphone) -->
+      <nav class="main-nav" id="main-nav">
+        <button class="nav-tab active" data-nav="accueil"><span class="nav-ico" data-ico="home"></span><span class="nav-label">Accueil</span></button>
+        <button class="nav-tab" data-nav="stock"><span class="nav-ico" data-ico="box"></span><span class="nav-label">Stock</span></button>
+        <button class="nav-tab" data-nav="scan"><span class="nav-ico" data-ico="scan"></span><span class="nav-label">Scanner</span></button>
+        <button class="nav-tab" data-nav="courses"><span class="nav-ico" data-ico="cart"></span><span class="nav-label">Courses</span><span class="nav-badge" id="badge-courses" hidden></span></button>
+        <button class="nav-tab" data-nav="commandes"><span class="nav-ico" data-ico="truck"></span><span class="nav-label">Commandes</span><span class="nav-badge" id="badge-commandes" hidden></span></button>
+        <button class="nav-tab" data-nav="peremption"><span class="nav-ico" data-ico="clock"></span><span class="nav-label">Péremption</span><span class="nav-badge" id="badge-peremption" hidden></span></button>
+        <button class="nav-tab nav-desktop" data-nav="reglages"><span class="nav-ico" data-ico="settings"></span><span class="nav-label">Réglages</span></button>
+      </nav>
       <div class="header-actions">
-        <button class="btn-icon" id="btn-help" title="Aide">?</button>
-        <button class="btn-ghost-sm" id="btn-export" title="Sauvegarder mes données">⬇<span class="btn-label"> Sauvegarde</span></button>
-        <button class="btn-ghost-sm" id="btn-import" title="Restaurer une sauvegarde">⬆<span class="btn-label"> Restaurer</span></button>
-        <button class="btn-ghost-sm" id="btn-logout" title="Se déconnecter" hidden>⏻</button>
+        <button class="btn-icon" id="btn-help" title="Aide" data-ico="help" data-size="18"></button>
+        <button class="btn-icon nav-mobile" id="btn-reglages-mobile" title="Réglages" data-ico="settings" data-size="18"></button>
+        <button class="btn-ghost-sm" id="btn-export" title="Sauvegarder mes données"><span data-ico="download" data-size="16"></span><span class="btn-label"> Sauvegarde</span></button>
+        <button class="btn-ghost-sm" id="btn-import" title="Restaurer une sauvegarde"><span data-ico="upload" data-size="16"></span><span class="btn-label"> Restaurer</span></button>
+        <button class="btn-ghost-sm" id="btn-logout" title="Se déconnecter" hidden data-ico="power" data-size="16"></button>
         <input type="file" id="import-file" accept="application/json" hidden>
       </div>
     </div>
   </header>
-
-  <!-- Navigation principale (haut sur ordinateur, bas sur téléphone) -->
-  <nav class="main-nav" id="main-nav">
-    <button class="nav-tab active" data-nav="stock"><span class="nav-ico">📦</span><span class="nav-label">Stock</span></button>
-    <button class="nav-tab" data-nav="scan"><span class="nav-ico">📷</span><span class="nav-label">Scanner</span></button>
-    <button class="nav-tab" data-nav="courses"><span class="nav-ico">🛒</span><span class="nav-label">Courses</span><span class="nav-badge" id="badge-courses" hidden></span></button>
-    <button class="nav-tab" data-nav="commandes"><span class="nav-ico">🧾</span><span class="nav-label">Commandes</span><span class="nav-badge" id="badge-commandes" hidden></span></button>
-    <button class="nav-tab" data-nav="peremption"><span class="nav-ico">⏰</span><span class="nav-label">Péremption</span><span class="nav-badge" id="badge-peremption" hidden></span></button>
-    <button class="nav-tab" data-nav="reglages"><span class="nav-ico">⚙️</span><span class="nav-label">Réglages</span></button>
-  </nav>
 
   <!-- Contenu -->
   <main id="app" class="app-main"><!-- rendu dynamique --></main>
@@ -61,7 +62,8 @@
   <script src="firebase-db.js?v=2"></script>
   <!-- Lecteur de codes-barres / Datamatrix -->
   <script src="vendor/html5-qrcode.min.js?v=1"></script>
-  <!-- Application -->
-  <script src="app.js?v=6"></script>
+  <!-- Icônes vectorielles + application -->
+  <script src="icons.js?v=1"></script>
+  <script src="app.js?v=8"></script>
 </body>
 </html>

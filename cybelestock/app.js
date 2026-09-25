@@ -22,7 +22,8 @@
      ÉTAT
      ========================================================= */
   let state = null;
-  let view = { name: "stock", produitId: null, ficheTab: "stock", search: "" };
+  let view = { name: "accueil", produitId: null, ficheTab: "stock", search: "" };
+  const ico = (name, size) => (window.CybeleIcons ? window.CybeleIcons.ico(name, size) : "");
   const openCats = new Set(); // catégories dépliées (fermées par défaut)
   let cmdTab = "encours";       // sous-onglet de la vue Commandes
   let receptionCtx = null;      // { commandeId } pendant une réception par scan
@@ -476,7 +477,8 @@
       t.classList.toggle("active", view.name === target || (view.name === "fiche" && target === "stock")
         || (view.name === "commande" && target === "commandes"));
     });
-    if (view.name === "stock") renderStock();
+    if (view.name === "accueil") renderAccueil();
+    else if (view.name === "stock") renderStock();
     else if (view.name === "fiche") renderFiche();
     else if (view.name === "scan") renderScan();
     else if (view.name === "courses") renderCourses();
@@ -504,6 +506,98 @@
   }
 
   /* =========================================================
+     VUE : ACCUEIL (tableau de bord)
+     ========================================================= */
+  function prenomUtilisateur() {
+    const email = window.CybeleAuth && window.CybeleAuth.email ? window.CybeleAuth.email() : null;
+    if (!email) return "";
+    const local = email.split("@")[0].split(/[._-]/)[0];
+    return local ? local.charAt(0).toUpperCase() + local.slice(1) : "";
+  }
+  function renderAccueil() {
+    const { besoin, enAttente } = aCommander();
+    const { past, soon } = alertesPeremption();
+    const cmdsEnCours = state.commandesSuivi.filter(c => c.statut !== "archivee").sort((a, b) => (a.date < b.date ? 1 : -1));
+    const aRecevoir = cmdsEnCours.length;
+    const fin = financeStats();
+    const moisNow = todayIso().slice(0, 7), anNow = todayIso().slice(0, 4);
+    const mois6 = derniersMois(6);
+    const maxM = Math.max(1, ...mois6.map(k => fin.parMois[k] || 0));
+    const catKeys = Object.keys(fin.parCat).filter(k => fin.parCat[k] > 0).sort((a, b) => fin.parCat[b] - fin.parCat[a]).slice(0, 4);
+    const enStock = state.produits.filter(p => stockTotal(p) > 0).length;
+    const nbPerempt = past.length + soon.length;
+    const prenom = prenomUtilisateur();
+    const dateJour = new Date().toLocaleDateString("fr-FR", { weekday: "long", day: "numeric", month: "long" });
+    const ordre = { recue: 0, partielle: 1, attente: 2 };
+    const cmdsTri = cmdsEnCours.slice().sort((a, b) => ordre[a.statut] - ordre[b.statut]);
+    const sousTitre = [];
+    if (aRecevoir) sousTitre.push(`${aRecevoir} livraison${aRecevoir > 1 ? "s" : ""} attendue${aRecevoir > 1 ? "s" : ""}`);
+    if (besoin.length) sousTitre.push(`${besoin.length} produit${besoin.length > 1 ? "s" : ""} à commander`);
+    if (past.length) sousTitre.push(`${past.length} lot${past.length > 1 ? "s" : ""} périmé${past.length > 1 ? "s" : ""}`);
+
+    const kpi = (cls, icon, n, label, nav, extra) => `
+      <button class="kpi" data-go="${nav}" ${extra || ""}>
+        <span class="kpi-ico ${cls}">${ico(icon, 28)}</span>
+        <span class="kpi-n">${n}</span>
+        <span class="kpi-l">${label}</span>
+        <span class="kpi-a">${ico("arrow", 16)}</span>
+      </button>`;
+
+    app.innerHTML = `
+      <div class="hello">
+        <h1>Bonjour${prenom ? " " + esc(prenom) : ""}</h1>
+        <p>${dateJour.charAt(0).toUpperCase() + dateJour.slice(1)}${sousTitre.length ? " · " + sousTitre.join(" · ") : " · tout est en ordre"}</p>
+      </div>
+      <div class="kpis">
+        ${kpi(besoin.length ? "amber" : "teal", "alert", besoin.length, `produit${besoin.length > 1 ? "s" : ""} à commander`, "courses")}
+        ${kpi("teal", "box", enStock, `produit${enStock > 1 ? "s" : ""} en stock <span style="font-weight:400">/ ${state.produits.length}</span>`, "stock")}
+        ${kpi("blue", "truck", aRecevoir, `commande${aRecevoir > 1 ? "s" : ""} à réceptionner`, "commandes")}
+        ${kpi(past.length ? "red" : "purple", "clock", nbPerempt, `péremption${nbPerempt > 1 ? "s" : ""} à surveiller`, "peremption")}
+      </div>
+      <div class="dash-row">
+        <div class="card hero" data-go="finances" role="button">
+          <h3>Valeur du stock <small>temps réel</small></h3>
+          <div class="big">${fmtEur(fin.valeur)}</div>
+          <div class="sub">${state.produits.length} produit${state.produits.length > 1 ? "s" : ""} · ${fmtEur(fin.parMois[moisNow] || 0)} dépensés ce mois-ci · ${fmtEur(fin.parAn[anNow] || 0)} en ${anNow}</div>
+          <div class="bars">${mois6.map(k => `<div class="${k === moisNow ? "on" : ""}" style="height:${Math.max(6, Math.round((fin.parMois[k] || 0) / maxM * 100))}%" title="${moisLabel(k)} : ${fmtEur(fin.parMois[k] || 0)}"><span>${esc(moisLabel(k, true).replace(".", ""))}</span></div>`).join("")}</div>
+          <div class="hero-link">${fin.nbSans ? `<span style="opacity:.85;font-weight:500">${fin.nbSans} produit${fin.nbSans > 1 ? "s" : ""} sans prix connu · </span>` : ""}Voir dépenses &amp; prix ${ico("arrow", 16)}</div>
+        </div>
+        <div class="card">
+          <h3>Commandes en cours <small>${aRecevoir}</small></h3>
+          ${cmdsTri.length ? cmdsTri.slice(0, 3).map(c => {
+            const tot = c.lignes.reduce((t, l) => t + l.qty, 0), rec = c.lignes.reduce((t, l) => t + Math.min(l.recu, l.qty), 0);
+            return `<div class="li li-block" data-open-cmd="${c.id}">
+              <div class="li-top"><div><b>${esc(nomFournisseurCommande(c))}</b><div class="sub">${c.numero ? "n° " + esc(c.numero) + " · " : ""}${fmtEur(montantCommande(c))}</div></div>
+                <span class="pill ${c.statut === "partielle" ? "p-amber" : c.statut === "recue" ? "p-teal" : "p-blue"}">${c.statut === "partielle" ? rec + " / " + tot + " reçus" : c.statut === "recue" ? "À archiver" : "En attente"}</span></div>
+              ${c.statut === "partielle" ? `<div class="prog"><i style="width:${tot ? Math.round(rec / tot * 100) : 0}%"></i></div>` : ""}
+            </div>`; }).join("") : `<div class="sub" style="padding:6px 0 10px">Aucune commande en cours.</div>`}
+          ${cmdsTri.length > 3 ? `<div class="sub" style="padding-top:8px"><a href="#" data-go="commandes">Voir les ${cmdsTri.length} commandes →</a></div>` : ""}
+          <h3 style="margin-top:16px">À commander <small>${besoin.length}</small></h3>
+          ${besoin.length ? besoin.slice(0, 4).map(({ p }) => `<div class="li" data-goto="${p.id}"><span>${esc(p.name)}</span><span class="pill ${stockTotal(p) === 0 ? "p-red" : "p-amber"}">${stockTotal(p)} / ${p.stockIdeal || "?"}</span></div>`).join("")
+            : `<div class="sub" style="padding:6px 0">Rien à commander : tous les stocks sont au-dessus de leur seuil.</div>`}
+          ${besoin.length > 4 ? `<div class="sub" style="padding-top:8px"><a href="#" data-go="courses">Voir la liste complète (${besoin.length}) →</a></div>` : ""}
+        </div>
+        <div class="card">
+          <h3>Péremptions <small>${nbPerempt} lot${nbPerempt > 1 ? "s" : ""}</small></h3>
+          ${nbPerempt ? past.concat(soon).slice(0, 4).map(({ p, l }) => `<div class="li" data-goto="${p.id}"><div><b>${esc(p.name)}</b><div class="sub">${l.qty} ${esc(p.unite)}${l.qty > 1 ? "s" : ""}${l.lot ? " · lot " + esc(l.lot) : ""}</div></div><span class="pill ${l.peremption < todayIso() ? "p-red" : "p-amber"}">${fmtDate(l.peremption).slice(0, 5)}</span></div>`).join("")
+            : `<div class="sub" style="padding:6px 0">Aucun lot périmé ni bientôt périmé.</div>`}
+          ${nbPerempt > 4 ? `<div class="sub" style="padding-top:8px"><a href="#" data-go="peremption">Voir toutes les alertes (${nbPerempt}) →</a></div>` : ""}
+          <h3 style="margin-top:16px">Stock par catégorie <small>valeur</small></h3>
+          ${catKeys.length ? catKeys.map(k => `<div class="li"><span>${esc(k)}</span><b>${fmtEur(fin.parCat[k])}</b></div>`).join("") : `<div class="sub" style="padding:6px 0">Renseignez des prix (ou intégrez des commandes) pour valoriser le stock.</div>`}
+        </div>
+      </div>`;
+
+    app.querySelectorAll("[data-go]").forEach(el => el.onclick = (e) => {
+      e.preventDefault();
+      const t = el.dataset.go;
+      if (t === "finances") { cmdTab = "finances"; switchView("commandes"); }
+      else switchView(t);
+    });
+    app.querySelectorAll("[data-open-cmd]").forEach(el => el.onclick = () => switchView("commande", { commandeId: el.dataset.openCmd }));
+    app.querySelectorAll("[data-goto]").forEach(el => el.onclick = () => switchView("fiche", { produitId: el.dataset.goto }));
+  }
+
+  /* =========================================================
      VUE : STOCK
      ========================================================= */
   function renderStock() {
@@ -512,8 +606,8 @@
     let html = `
       <div class="toolbar">
         <div class="grow"><input class="search-input" id="stock-search" type="search"
-             placeholder="🔍 Rechercher un produit…" value="${esc(view.search)}"></div>
-        <button class="btn ${caveOnly ? "filter-on" : ""}" id="btn-cave-filter" title="N'afficher que les produits rangés (aussi) à la cave">🏠 Cave</button>
+             placeholder="Rechercher un produit…" value="${esc(view.search)}"></div>
+        <button class="btn ${caveOnly ? "filter-on" : ""}" id="btn-cave-filter" title="N'afficher que les produits rangés (aussi) à la cave">${ico("house", 18)} Cave</button>
         <button class="btn btn-primary" id="btn-add-prod">＋ Produit</button>
         <button class="btn" id="btn-add-cat">＋ Catégorie</button>
       </div>`;
@@ -868,7 +962,7 @@
     if (rc) scanMode = "entree";
     app.innerHTML = `
       <div class="scan-wrap">
-        <h2 class="view-title">📷 Scanner</h2>
+        <h2 class="view-title">${ico("scan", 24)} Scanner</h2>
         <p class="view-sub">Visez le petit carré <strong>Datamatrix</strong> (ou le code-barres) de la boîte.
         La péremption et le lot se remplissent tout seuls quand le code les contient.</p>
         ${rc ? `<div class="reception-banner">
@@ -1413,7 +1507,7 @@
   function renderCourses() {
     const { besoin, enAttente } = aCommander();
     let html = `
-      <h2 class="view-title">🛒 Liste de courses</h2>
+      <h2 class="view-title">${ico("cart", 24)} Liste de courses</h2>
       <p class="view-sub">Générée automatiquement dès qu'un stock passe sous son seuil mini.</p>`;
 
     if (!besoin.length && !enAttente.length) {
@@ -1519,7 +1613,7 @@
   function renderPeremption() {
     const { past, soon } = alertesPeremption();
     let html = `
-      <h2 class="view-title">⏰ Alertes péremption</h2>
+      <h2 class="view-title">${ico("clock", 24)} Alertes péremption</h2>
       <p class="view-sub">Concerne les produits où l'alerte est activée (fiche produit → Réglages),
       plus tout lot déjà périmé.</p>`;
 
@@ -1597,7 +1691,7 @@
     return n.toLocaleString("fr-FR", { minimumFractionDigits: 2, maximumFractionDigits: 2 }) + " €";
   }
   const STATUT_LABEL = { attente: "En attente de livraison", partielle: "Partiellement reçue", recue: "Tout est arrivé", archivee: "Archivée" };
-  const STATUT_ICON = { attente: "🕒", partielle: "🟠", recue: "✅", archivee: "🗄" };
+  const STATUT_ICON = { attente: "🕒", partielle: "⚠", recue: "✔", archivee: "📁" };
 
   // Marque les produits de la commande « commandés » dans la liste de courses
   function marquerCommandesCourses(c) {
@@ -1642,12 +1736,12 @@
     const gmailOk = !!(state.gmail && state.gmail.clientId);
 
     let html = `
-      <h2 class="view-title">🧾 Commandes</h2>
+      <h2 class="view-title">${ico("truck", 24)} Commandes</h2>
       <p class="view-sub">Suivi des commandes fournisseurs : réception par scan, reliquats, dépenses et valeur du stock.</p>
       <div class="fiche-tabs">
-        <button class="fiche-tab ${cmdTab === "encours" ? "active" : ""}" data-ctab="encours">📬 En cours (${enCours.length})</button>
-        <button class="fiche-tab ${cmdTab === "archivees" ? "active" : ""}" data-ctab="archivees">🗄 Archivées (${archivees.length})</button>
-        <button class="fiche-tab ${cmdTab === "finances" ? "active" : ""}" data-ctab="finances">📊 Dépenses & valeur</button>
+        <button class="fiche-tab ${cmdTab === "encours" ? "active" : ""}" data-ctab="encours">✉ En cours (${enCours.length})</button>
+        <button class="fiche-tab ${cmdTab === "archivees" ? "active" : ""}" data-ctab="archivees">📁 Archivées (${archivees.length})</button>
+        <button class="fiche-tab ${cmdTab === "finances" ? "active" : ""}" data-ctab="finances">€ Dépenses & valeur</button>
       </div>`;
 
     if (cmdTab === "finances") {
@@ -1656,8 +1750,8 @@
       html += `
         <div class="toolbar">
           <button class="btn btn-primary btn-sm" id="cmd-new">＋ Nouvelle commande</button>
-          <button class="btn btn-sm" id="cmd-paste">✉️ Coller un mail de commande</button>
-          <button class="btn btn-sm" id="cmd-gmail" title="${gmailOk ? "Chercher les mails de commande dans la boîte Gmail" : "À configurer dans ⚙️ Réglages"}">📬 Vérifier mes mails${gmailOk ? "" : " (à configurer)"}</button>
+          <button class="btn btn-sm" id="cmd-paste">✉ Coller un mail de commande</button>
+          <button class="btn btn-sm" id="cmd-gmail" title="${gmailOk ? "Chercher les mails de commande dans la boîte Gmail" : "À configurer dans ⚙️ Réglages"}">✉ Vérifier mes mails${gmailOk ? "" : " (à configurer)"}</button>
         </div>`;
       const list = cmdTab === "encours" ? enCours : archivees;
       if (!list.length) {
@@ -1692,7 +1786,7 @@
           <span class="cmd-icon">${STATUT_ICON[c.statut]}</span>
           <div class="grow">
             <div class="cmd-title">${esc(nomFournisseurCommande(c))} <span class="cmd-num">${c.numero ? "n° " + esc(c.numero) : "sans n°"}</span></div>
-            <div class="lot-sub">${fmtDate(c.date)} · ${c.lignes.length} ligne${c.lignes.length > 1 ? "s" : ""} · ${fmtEur(montantCommande(c))}${c.source === "mail" ? " · ✉️" : ""}</div>
+            <div class="lot-sub">${fmtDate(c.date)} · ${c.lignes.length} ligne${c.lignes.length > 1 ? "s" : ""} · ${fmtEur(montantCommande(c))}${c.source === "mail" ? " · ✉" : ""}</div>
           </div>
           <span class="cmd-statut">${STATUT_LABEL[c.statut]}</span>
         </div>
@@ -1748,7 +1842,7 @@
       <div class="toolbar">
         <button class="btn btn-primary" id="cmd-scan" ${rel.length ? "" : "disabled"}>📷 Scanner la réception</button>
         <button class="btn" id="cmd-edit">✎ Modifier</button>
-        ${c.statut === "recue" ? `<button class="btn" id="cmd-archive">🗄 Archiver</button>` : ""}
+        ${c.statut === "recue" ? `<button class="btn" id="cmd-archive">📁 Archiver</button>` : ""}
         <button class="btn btn-danger btn-sm" id="cmd-del" style="margin-left:auto">🗑</button>
       </div>
       <div class="cmd-progress"><div style="width:${totalQty ? Math.round(recuQty / totalQty * 100) : 0}%"></div></div>
@@ -1759,13 +1853,13 @@
       </div>`}`;
 
     if (c.statut === "partielle" && rel.length) {
-      html += `<div class="card card-warn"><h4>🟠 Reliquat — encore attendu (${rel.length})</h4>
+      html += `<div class="card card-warn"><h4>⚠ Reliquat — encore attendu (${rel.length})</h4>
         ${rel.map(l => ligneHtml(l, true)).join("")}</div>`;
     }
     html += `<div class="card"><h4>Articles commandés (${c.lignes.length})</h4>
       ${c.lignes.length ? c.lignes.map(l => ligneHtml(l, false)).join("") : '<div class="lot-sub" style="padding:8px 0">Aucune ligne — cliquez sur « ✎ Modifier » pour en ajouter.</div>'}
     </div>`;
-    if (c.note || c.mailSujet) html += `<div class="card"><h4>Note</h4><div class="lot-sub" style="white-space:pre-wrap">${c.mailSujet ? "✉️ " + esc(c.mailSujet) + "\n" : ""}${esc(c.note || "")}</div></div>`;
+    if (c.note || c.mailSujet) html += `<div class="card"><h4>Note</h4><div class="lot-sub" style="white-space:pre-wrap">${c.mailSujet ? "✉ " + esc(c.mailSujet) + "\n" : ""}${esc(c.note || "")}</div></div>`;
 
     app.innerHTML = html;
     document.getElementById("cmd-back").onclick = () => switchView("commandes");
@@ -1804,7 +1898,7 @@
       const refOk = l.refId && reference(p, l.refId) ? l.refId : (p.references[0] ? p.references[0].id : null);
       openEntreeModal(p.id, {
         scanned, refId: refOk, qty: reste || 1,
-        hint: `🧾 Commande ${esc(c.numero || "")} — ${reste} attendu${reste > 1 ? "s" : ""} sur cette ligne. La quantité saisie entre en stock et valide la réception.`,
+        hint: `🚚 Commande ${esc(c.numero || "")} — ${reste} attendu${reste > 1 ? "s" : ""} sur cette ligne. La quantité saisie entre en stock et valide la réception.`,
         onDone: apres,
       });
     } else {
@@ -1834,7 +1928,7 @@
       <p style="margin-bottom:10px">Tous les articles de la commande <strong>${esc(nomFournisseurCommande(c))}${c.numero ? " n° " + esc(c.numero) : ""}</strong> ont été reçus.</p>
       <p class="lot-sub">On l'archive ? Elle restera consultable dans « Archivées » et comptera dans les dépenses.</p>`,
       `<button class="btn" data-later style="flex:1;justify-content:center">Plus tard</button>
-       <button class="btn btn-primary" data-ok style="flex:2;justify-content:center">🗄 Archiver</button>`);
+       <button class="btn btn-primary" data-ok style="flex:2;justify-content:center">📁 Archiver</button>`);
     modalRoot.querySelector("[data-later]").onclick = () => { closeModal(); render(); };
     modalRoot.querySelector("[data-ok]").onclick = () => { closeModal(); archiverCommande(c); };
   }
@@ -1858,7 +1952,7 @@
     if (!lignes.length) lignes.push({ id: uid(), designation: "", ref: "", produitId: null, refId: null, qty: 1, prix: 0, recu: 0 });
     const prods = state.produits.slice().sort((a, b) => a.name.localeCompare(b.name, "fr"));
 
-    openModal(existing ? "✎ Commande" : (draft ? "✉️ Commande trouvée — vérifiez puis intégrez" : "＋ Nouvelle commande"), `
+    openModal(existing ? "✎ Commande" : (draft ? "✉ Commande trouvée — vérifiez puis intégrez" : "＋ Nouvelle commande"), `
       <div class="form-grid">
         <div class="field"><label>Fournisseur</label>
           <select id="cm-fourn">
@@ -1878,7 +1972,7 @@
       <div id="cm-lines"></div>
       <button class="btn btn-sm" id="cm-add-line" style="margin-top:8px">＋ Ajouter un article</button>
       <div class="field full" style="margin-top:12px"><label>Note</label><input id="cm-note" value="${esc(c.note || "")}" placeholder="facultatif"></div>
-      ${draft && draft.mailSujet ? `<div class="field-hint" style="margin-top:8px">✉️ ${esc(draft.mailSujet)}</div>` : ""}`,
+      ${draft && draft.mailSujet ? `<div class="field-hint" style="margin-top:8px">✉ ${esc(draft.mailSujet)}</div>` : ""}`,
       `<button class="btn" data-cancel style="flex:1;justify-content:center">Annuler</button>
        <button class="btn btn-primary" data-ok style="flex:2;justify-content:center">${existing ? "Enregistrer" : "✔ Intégrer la commande"}</button>`);
 
@@ -2186,7 +2280,7 @@
   }
 
   function openCollerMailModal() {
-    openModal("✉️ Coller un mail de commande", `
+    openModal("✉ Coller un mail de commande", `
       <p class="lot-sub" style="margin-bottom:8px">Ouvrez le mail de confirmation du fournisseur, sélectionnez tout (Ctrl+A), copiez (Ctrl+C) et collez ici.
       Je repère le n° de commande, la date, le total et les articles — vous vérifiez tout avant d'intégrer.</p>
       <div class="field full"><textarea id="cm-paste" style="min-height:180px" placeholder="Collez le texte du mail ici…"></textarea></div>`,
@@ -2273,7 +2367,7 @@
   async function gmailVerifier(opts) {
     opts = opts || {};
     if (!state.gmail || !state.gmail.clientId) { openGmailAideModal(); return; }
-    toast("📬 Connexion à Gmail…");
+    toast("✉ Connexion à Gmail…");
     let token;
     try { token = await gmailGetToken(true); }
     catch (e) { toast("Connexion Gmail impossible (" + e.message + "). Vérifiez l'ID client dans ⚙️ Réglages."); return; }
@@ -2298,7 +2392,7 @@
       // Garde la liste des mails ignorés à une taille raisonnable
       if (state.mailsIgnores.length > 400) state.mailsIgnores = state.mailsIgnores.slice(-300);
       save();
-      if (!drafts.length) { toast(opts.manuel ? "Aucune nouvelle commande trouvée dans les mails." : "📬 Mails vérifiés : rien de nouveau."); render(); return; }
+      if (!drafts.length) { toast(opts.manuel ? "Aucune nouvelle commande trouvée dans les mails." : "✉ Mails vérifiés : rien de nouveau."); render(); return; }
       proposerMails(drafts);
     } catch (e) {
       toast("Lecture Gmail impossible (" + e.message + "). L'API Gmail est-elle activée ?");
@@ -2310,12 +2404,12 @@
     const d = drafts.shift();
     if (!d) { render(); return; }
     const f = d.fournisseurId ? fournisseur(d.fournisseurId) : null;
-    openModal("📬 J'ai trouvé cette commande", `
+    openModal("✉ J'ai trouvé cette commande", `
       <div class="scan-result-prod">
         <div class="p-name">${esc(f ? f.name : (d.fournisseurNom || "Expéditeur inconnu"))}${d.numero ? " — n° " + esc(d.numero) : ""}</div>
         <div class="p-sub">${fmtDate(d.date)}${d.total ? " · " + fmtEur(d.total) : ""} · ${d.lignes.length} article${d.lignes.length > 1 ? "s" : ""} reconnu${d.lignes.length > 1 ? "s" : ""}</div>
       </div>
-      <div class="lot-sub" style="margin-bottom:8px">✉️ ${esc(d.mailSujet || "")}<br>${esc(d.mailFrom || "")}</div>
+      <div class="lot-sub" style="margin-bottom:8px">✉ ${esc(d.mailSujet || "")}<br>${esc(d.mailFrom || "")}</div>
       ${d.lignes.length ? `<div class="as-list" style="max-height:160px">${d.lignes.slice(0, 12).map(l => `<div class="as-item" style="font-weight:500">${l.qty} × ${esc(l.designation)}${l.prix ? " — " + fmtEur(l.prix) : ""}${l.produitId ? ' <span class="as-cat">→ ' + esc((produit(l.produitId) || {}).name || "") + "</span>" : ""}</div>`).join("")}</div>` : ""}
       <p class="lot-sub" style="margin-top:10px">Dois-je l'intégrer au suivi des commandes ? Vous pourrez corriger chaque ligne avant de valider.${drafts.length ? ` (${drafts.length} autre${drafts.length > 1 ? "s" : ""} ensuite)` : ""}</p>`,
       `<button class="btn" data-ignore style="justify-content:center">Non, ignorer</button>
@@ -2332,7 +2426,7 @@
     if (!state.gmail || !state.gmail.clientId || state.gmail.auto === false) return;
     let last = null; try { last = localStorage.getItem("cybelestock-gmail-check"); } catch (e) {}
     if (last === todayIso()) return;
-    openModal("📬 Vérification des commandes", `
+    openModal("✉ Vérification des commandes", `
       <p style="margin-bottom:8px">Voulez-vous que je regarde dans la boîte mail${state.gmail.compte ? " <strong>" + esc(state.gmail.compte) + "</strong>" : ""} s'il y a de nouvelles commandes à intégrer ?</p>
       <p class="lot-sub">Je vous proposerai chaque commande trouvée ; rien n'est intégré sans votre accord.</p>`,
       `<button class="btn" data-later style="flex:1;justify-content:center">Pas aujourd'hui</button>
@@ -2342,7 +2436,7 @@
   }
 
   function openGmailAideModal() {
-    openModal("📬 Passerelle Gmail — mise en place", `
+    openModal("✉ Passerelle Gmail — mise en place", `
       <p class="lot-sub" style="margin-bottom:8px">Pour que CybèleStock puisse lire les mails de commande (en lecture seule), Google demande un « ID client OAuth ». À faire une seule fois, environ 10 minutes :</p>
       <ol style="margin:0 0 10px 18px;font-size:.9rem;line-height:1.7;color:var(--muted)">
         <li>Ouvrir <a href="https://console.cloud.google.com/apis/library/gmail.googleapis.com?project=cybele-gestion" target="_blank" rel="noopener">Google Cloud → API Gmail</a> (projet <strong>cybele-gestion</strong>, celui de l'application) et cliquer <strong>Activer</strong>.</li>
@@ -2360,26 +2454,15 @@
   /* =========================================================
      DÉPENSES & VALEUR DU STOCK
      ========================================================= */
-  function renderFinances() {
-    const cmds = state.commandesSuivi.slice();
+  // Chiffres financiers partagés (tableau de bord + onglet Dépenses & valeur)
+  function financeStats() {
     const parMois = {}, parAn = {};
-    cmds.forEach(c => {
+    state.commandesSuivi.forEach(c => {
       const m = montantCommande(c); if (!m) return;
       const mois = c.date.slice(0, 7), an = c.date.slice(0, 4);
       parMois[mois] = (parMois[mois] || 0) + m;
       parAn[an] = (parAn[an] || 0) + m;
     });
-    const moisKeys = Object.keys(parMois).sort().reverse().slice(0, 18);
-    const anKeys = Object.keys(parAn).sort().reverse();
-    const maxMois = Math.max(1, ...moisKeys.map(k => parMois[k]));
-    const maxAn = Math.max(1, ...anKeys.map(k => parAn[k]));
-    const moisLabel = (k) => new Date(k + "-01T00:00:00").toLocaleDateString("fr-FR", { month: "long", year: "numeric" });
-    const barre = (label, val, max, sub) => `
-      <div class="bar-row"><div class="bar-label">${label}${sub ? `<div class="lot-sub">${sub}</div>` : ""}</div>
-        <div class="bar-track"><div class="bar-fill" style="width:${Math.max(2, Math.round(val / max * 100))}%"></div></div>
-        <div class="bar-val">${fmtEur(val)}</div></div>`;
-
-    // Valeur du stock
     const hist = lignesPrix();
     let valeur = 0, nbVal = 0, nbSans = 0; const parCat = {}; const sansPrix = [];
     state.produits.forEach(p => {
@@ -2391,6 +2474,28 @@
       const cn = (categorie(p.categorieId) || {}).name || "Sans catégorie";
       parCat[cn] = (parCat[cn] || 0) + vp;
     });
+    return { parMois, parAn, hist, valeur, nbVal, nbSans, parCat, sansPrix };
+  }
+  function moisLabel(k, court) {
+    return new Date(k + "-01T00:00:00").toLocaleDateString("fr-FR", court ? { month: "short" } : { month: "long", year: "numeric" });
+  }
+  // Les 6 derniers mois (clé AAAA-MM), du plus ancien au plus récent
+  function derniersMois(n) {
+    const out = []; const d = new Date(); d.setDate(1);
+    for (let i = n - 1; i >= 0; i--) { const x = new Date(d.getFullYear(), d.getMonth() - i, 1); out.push(localIso(x).slice(0, 7)); }
+    return out;
+  }
+
+  function renderFinances() {
+    const { parMois, parAn, hist, valeur, nbVal, nbSans, parCat, sansPrix } = financeStats();
+    const moisKeys = Object.keys(parMois).sort().reverse().slice(0, 18);
+    const anKeys = Object.keys(parAn).sort().reverse();
+    const maxMois = Math.max(1, ...moisKeys.map(k => parMois[k]));
+    const maxAn = Math.max(1, ...anKeys.map(k => parAn[k]));
+    const barre = (label, val, max, sub) => `
+      <div class="bar-row"><div class="bar-label">${label}${sub ? `<div class="lot-sub">${sub}</div>` : ""}</div>
+        <div class="bar-track"><div class="bar-fill" style="width:${Math.max(2, Math.round(val / max * 100))}%"></div></div>
+        <div class="bar-val">${fmtEur(val)}</div></div>`;
     const catKeys = Object.keys(parCat).sort((a, b) => parCat[b] - parCat[a]);
     const maxCat = Math.max(1, ...catKeys.map(k => parCat[k]));
 
@@ -2420,7 +2525,7 @@
       <div class="card"><h4>📦 Valeur du stock par catégorie</h4>
         ${catKeys.length ? catKeys.filter(k => parCat[k] > 0).map(k => barre(esc(k), parCat[k], maxCat)).join("") : '<div class="lot-sub">Stock vide ou sans prix.</div>'}
         ${sansPrix.length ? `<div class="lot-sub" style="margin-top:10px">Sans prix connu : ${sansPrix.slice(0, 12).map(p => `<span data-goto="${p.id}" style="cursor:pointer;text-decoration:underline">${esc(p.name)}</span>`).join(", ")}${sansPrix.length > 12 ? "…" : ""} — renseignez un prix indicatif dans la référence, ou intégrez une commande.</div>` : ""}</div>
-      <div class="card"><h4>📈 Fourchette de prix d'achat</h4>
+      <div class="card"><h4>↗ Fourchette de prix d'achat</h4>
         <p class="lot-sub" style="margin-bottom:8px">Prix unitaire le plus bas / le plus haut / dernier payé, d'après les commandes intégrées.</p>
         ${prodKeys.length ? `<div class="price-table">
           <div class="price-head"><span>Produit</span><span>Bas</span><span>Haut</span><span>Dernier</span></div>
@@ -2450,7 +2555,7 @@
   }
   function openRestaurationModal() {
     if (!window.CybeleDB || !window.CybeleDB.loadFull) { toast("Points de restauration disponibles uniquement en ligne."); return; }
-    openModal("🛟 Points de restauration", `<div class="lot-sub">Chargement…</div>`,
+    openModal("↺ Points de restauration", `<div class="lot-sub">Chargement…</div>`,
       `<button class="btn" data-cancel style="flex:1;justify-content:center">Fermer</button>`);
     modalRoot.querySelector("[data-cancel]").onclick = closeModal;
     const keys = ["cybelestock-avant-commandes", "cybelestock-avant-restauration"].concat(SNAP_JOURS.map(j => "cybelestock-snap-" + j));
@@ -2482,7 +2587,7 @@
      ========================================================= */
   function renderReglages() {
     app.innerHTML = `
-      <h2 class="view-title">⚙️ Réglages</h2>
+      <h2 class="view-title">${ico("settings", 24)} Réglages</h2>
       <p class="view-sub">Fournisseurs, catégories et sauvegardes.</p>
 
       <div class="card">
@@ -2516,7 +2621,7 @@
       </div>
 
       <div class="card">
-        <h4>📬 Passerelle Gmail (commandes)</h4>
+        <h4>✉ Passerelle Gmail (commandes)</h4>
         <p class="settings-sub" style="margin-bottom:10px">
           CybèleStock peut lire (en lecture seule) la boîte mail du cabinet pour repérer les confirmations de commande
           et vous proposer de les intégrer. <button class="auth-link" id="rg-gmail-aide" style="display:inline;margin:0">Comment l'activer ?</button></p>
@@ -2533,7 +2638,7 @@
         </div>
         <div class="toolbar">
           <button class="btn btn-primary btn-sm" id="rg-gmail-save">Enregistrer</button>
-          <button class="btn btn-sm" id="rg-gmail-test" ${(state.gmail || {}).clientId ? "" : "disabled"}>📬 Vérifier maintenant</button>
+          <button class="btn btn-sm" id="rg-gmail-test" ${(state.gmail || {}).clientId ? "" : "disabled"}>✉ Vérifier maintenant</button>
           ${(state.gmail || {}).dernierCheck ? `<span class="settings-sub">Dernière vérification : ${new Date(state.gmail.dernierCheck).toLocaleString("fr-FR")}</span>` : ""}
         </div>
       </div>
@@ -2546,7 +2651,7 @@
         <div class="toolbar">
           <button class="btn btn-sm" id="rg-export">⬇ Télécharger une sauvegarde</button>
           <button class="btn btn-sm" id="rg-import">⬆ Restaurer une sauvegarde</button>
-          <button class="btn btn-sm" id="rg-restore-points">🛟 Points de restauration</button>
+          <button class="btn btn-sm" id="rg-restore-points">↺ Points de restauration</button>
         </div>
         <p class="settings-sub" style="margin-top:8px">Une copie automatique de vos données est faite en ligne à la première ouverture de chaque journée (7 jours glissants).</p>
       </div>`;
@@ -2620,6 +2725,8 @@
   document.getElementById("btn-help").onclick = () => {
     openModal("Aide — CybèleStock", `
       <ul style="margin:0 0 12px 18px; color:var(--muted); line-height:1.8; font-size:.92rem">
+        <li><strong>Accueil</strong> : le tableau de bord — produits sous le seuil, commandes à réceptionner, péremptions,
+          valeur du stock et dépenses. Chaque chiffre est cliquable.</li>
         <li><strong>📦 Stock</strong> : vos produits rangés par catégories. Boutons ＋/− pour les entrées/sorties rapides.
           Le stock idéal et le seuil mini se règlent dans la fiche de chaque produit.</li>
         <li><strong>📷 Scanner</strong> : au téléphone, scannez le Datamatrix des boîtes. Le 1er scan associe le code
@@ -2628,7 +2735,7 @@
         <li><strong>🛒 Courses</strong> : dès qu'un stock passe sous son seuil, le produit apparaît ici avec
           les liens vers vos fournisseurs. « ✔ Commandé » le met en attente de réception.</li>
         <li><strong>⏰ Péremption</strong> : lots périmés ou bientôt périmés (alerte activable produit par produit).</li>
-        <li><strong>🧾 Commandes</strong> : intégrez vos commandes (à la main, en collant le mail du fournisseur, ou via la
+        <li><strong>🚚 Commandes</strong> : intégrez vos commandes (à la main, en collant le mail du fournisseur, ou via la
           passerelle Gmail). À la livraison, « 📷 Scanner la réception » : chaque scan valide une ligne et entre les boîtes en stock.
           Commande complète → on vous propose de l'archiver ; incomplète → elle passe en orange avec ses reliquats en haut.
           L'onglet « Dépenses & valeur » montre les dépenses par mois/année, la fourchette de prix par produit et la valeur du stock.</li>
@@ -2645,7 +2752,9 @@
      NAVIGATION
      ========================================================= */
   document.querySelectorAll(".nav-tab").forEach(t => t.onclick = () => switchView(t.dataset.nav));
-  document.getElementById("brand-home").onclick = (e) => { e.preventDefault(); switchView("stock"); };
+  document.getElementById("brand-home").onclick = (e) => { e.preventDefault(); switchView("accueil"); };
+  const regMob = document.getElementById("btn-reglages-mobile");
+  if (regMob) regMob.onclick = () => switchView("reglages");
 
   /* =========================================================
      TOASTS
@@ -2784,6 +2893,6 @@
     setTimeout(gmailVerifQuotidienne, 800);
   }
   // Outils de test (aperçu local uniquement)
-  if (/^(localhost|127\.)/.test(location.hostname)) window.CybeleStockDebug = { parseCommandeTexte, htmlToText };
+  if (/^(localhost|127\.)/.test(location.hostname)) window.CybeleStockDebug = { parseCommandeTexte, htmlToText, getState: () => state, setState: (s) => { state = normalize(s); save(); render(); } };
   init();
 })();
