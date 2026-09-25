@@ -268,7 +268,7 @@
         l.refId = l.refId || null;
         l.qty = Math.max(1, Math.round(Number(l.qty) || 1));
         l.prix = Number(l.prix) > 0 ? Number(l.prix) : 0;
-        l.recu = Math.max(0, Math.round(Number(l.recu) || 0));
+        l.recu = Math.max(0, Math.round((Number(l.recu) || 0) * 100) / 100);
       });
       if (c.statut !== "archivee") c.statut = statutCommande(c);
     });
@@ -280,7 +280,7 @@
       p.delaiAlerteMois = num(p.delaiAlerteMois) || 3;
       p.enCave = !!p.enCave;
       p.references = Array.isArray(p.references) ? p.references : [];
-      p.references.forEach(r => { r.gtins = Array.isArray(r.gtins) ? r.gtins : []; });
+      p.references.forEach(r => { r.gtins = Array.isArray(r.gtins) ? r.gtins : []; r.cond = Math.max(1, Math.round(Number(r.cond) || 1)); });
       p.lots = Array.isArray(p.lots) ? p.lots : [];
       p.lots.forEach(l => { l.qty = num(l.qty); });
       p.lots = p.lots.filter(l => l.qty > 0);
@@ -849,7 +849,7 @@
           return `
             <div class="ref-row">
               <div class="ref-info">
-                <div class="ref-fournisseur">${f ? esc(f.name) : "Fournisseur ?"} ${r.prix ? `<span style="color:var(--accent-dark);font-weight:600">· ${esc(r.prix)} €</span>` : ""}</div>
+                <div class="ref-fournisseur">${f ? esc(f.name) : "Fournisseur ?"} ${r.prix ? `<span style="color:var(--accent-dark);font-weight:600">· ${esc(r.prix)} €${r.cond > 1 ? " la boîte de " + r.cond : ""}</span>` : ""}${!r.prix && r.cond > 1 ? `<span class="lot-sub"> · boîte de ${r.cond}</span>` : ""}</div>
                 <div class="ref-sub">${r.ref ? "réf " + esc(r.ref) : ""}${r.designation ? " · " + esc(r.designation) : ""}</div>
                 ${r.gtins.length ? `<div class="ref-sub">codes : ${r.gtins.map((g, i) =>
                   `<span style="white-space:nowrap">${esc(g)} <button data-del-gtin="${r.id}|${i}" style="border:none;background:none;color:var(--danger);cursor:pointer" title="Oublier ce code">✕</button></span>`).join(" ")}</div>` : ""}
@@ -1406,8 +1406,11 @@
           <div class="field-hint">Fournisseur manquant ? Ajoutez-le dans ⚙️ Réglages.</div></div>
         <div class="field"><label>Référence produit</label>
           <input id="nr-ref" value="${r ? esc(r.ref) : ""}" placeholder="ex : 258-9665"></div>
-        <div class="field"><label>Prix indicatif (€)</label>
+        <div class="field"><label>Prix indicatif (€) de la boîte</label>
           <input id="nr-prix" value="${r ? esc(r.prix || "") : ""}" placeholder="facultatif"></div>
+        <div class="field"><label>Unités par boîte</label>
+          <input id="nr-cond" type="number" min="1" inputmode="numeric" value="${r && r.cond > 1 ? r.cond : 1}">
+          <div class="field-hint">Si une boîte commandée contient plusieurs unités comptées en stock (ex. 2), indiquez-le : le prix est divisé pour la valeur du stock.</div></div>
         <div class="field full"><label>Désignation (nom affiché)</label>
           <input id="nr-desig" value="${r ? esc(r.designation || "") : ""}" placeholder="facultatif — corrigez ici un nom bizarre issu d'un scan"></div>
         ${r ? `<div class="field full"><label>Rattachée au produit</label>
@@ -1435,6 +1438,7 @@
         fournisseurId: document.getElementById("nr-fourn").value,
         ref: document.getElementById("nr-ref").value.trim(),
         prix: document.getElementById("nr-prix").value.trim(),
+        cond: Math.max(1, Math.round(Number(document.getElementById("nr-cond").value) || 1)),
         designation: document.getElementById("nr-desig").value.trim(),
         url: document.getElementById("nr-url").value.trim(),
         note: document.getElementById("nr-note").value.trim(),
@@ -1710,18 +1714,22 @@
     out.sort((a, b) => (a.date < b.date ? 1 : a.date > b.date ? -1 : 0));
     return out;
   }
+  // Unités par boîte d'une référence (1 par défaut)
+  function condRef(p, refId) { const r = refId ? reference(p, refId) : null; return r && r.cond > 1 ? r.cond : 1; }
+  // Prix d'une unité de stock : prix de la boîte (commande, sinon indicatif) ÷ unités par boîte
   function prixUnitaire(p, lot, cache) {
     const hist = cache || lignesPrix();
+    const out = (prix, src, refId) => { const c = condRef(p, refId); return { prix: prix / c, prixBoite: prix, cond: c, src }; };
     if (lot && lot.refId) {
       const h = hist.find(x => x.refId === lot.refId);
-      if (h) return { prix: h.prix, src: "commande" };
+      if (h) return out(h.prix, "commande", lot.refId);
       const r = reference(p, lot.refId);
-      if (r && parsePrix(r.prix)) return { prix: parsePrix(r.prix), src: "indicatif" };
+      if (r && parsePrix(r.prix)) return out(parsePrix(r.prix), "indicatif", lot.refId);
     }
     const hp = hist.find(x => x.produitId === p.id);
-    if (hp) return { prix: hp.prix, src: "commande" };
+    if (hp) return out(hp.prix, "commande", hp.refId || (p.references[0] && p.references[0].id));
     const r2 = p.references.find(r => parsePrix(r.prix));
-    if (r2) return { prix: parsePrix(r2.prix), src: "indicatif" };
+    if (r2) return out(parsePrix(r2.prix), "indicatif", r2.id);
     return null;
   }
 
@@ -1816,10 +1824,10 @@
       const done = reste === 0;
       return `
         <div class="cmd-line ${done ? "done" : ""} ${isRel ? "rel" : ""}">
-          <div class="cmd-line-qty">${l.recu}/${l.qty}</div>
+          <div class="cmd-line-qty">${Number.isInteger(l.recu) ? l.recu : l.recu.toFixed(1)}/${l.qty}</div>
           <div class="grow">
             <div class="cmd-line-name">${esc(nomLigne(l))}</div>
-            <div class="lot-sub">${l.ref ? "réf " + esc(l.ref) + " · " : ""}${l.prix ? fmtEur(l.prix) + " l'unité" : "prix inconnu"}
+            <div class="lot-sub">${l.ref ? "réf " + esc(l.ref) + " · " : ""}${l.prix ? fmtEur(l.prix) + " la boîte" : "prix inconnu"}
               ${p ? ` · <span data-goto="${p.id}" style="cursor:pointer;text-decoration:underline">${esc(p.name)}</span> (stock ${stockTotal(p)})` : ` · <span class="cmd-unlinked">non lié à un produit</span>`}</div>
           </div>
           ${c.statut === "archivee" ? "" : `
@@ -1887,8 +1895,9 @@
     const l = c.lignes.find(x => x.id === ligneId); if (!l) return;
     const reste = Math.max(0, l.qty - l.recu);
     const p = l.produitId ? produit(l.produitId) : null;
+    const cond = p ? condRef(p, l.refId) : 1; // unités de stock par boîte commandée
     const apres = (qty) => {
-      l.recu = Math.min(l.qty, l.recu + qty);
+      l.recu = Math.min(l.qty, Math.round((l.recu + qty / cond) * 100) / 100);
       c.statut = statutCommande(c);
       save();
       if (c.statut === "recue") proposerArchivage(c);
@@ -1897,8 +1906,8 @@
     if (p) {
       const refOk = l.refId && reference(p, l.refId) ? l.refId : (p.references[0] ? p.references[0].id : null);
       openEntreeModal(p.id, {
-        scanned, refId: refOk, qty: reste || 1,
-        hint: `🚚 Commande ${esc(c.numero || "")} — ${reste} attendu${reste > 1 ? "s" : ""} sur cette ligne. La quantité saisie entre en stock et valide la réception.`,
+        scanned, refId: refOk, qty: Math.max(1, Math.ceil(reste * cond)),
+        hint: `🚚 Commande ${esc(c.numero || "")} — ${reste} boîte${reste > 1 ? "s" : ""} attendue${reste > 1 ? "s" : ""} sur cette ligne${cond > 1 ? ` (${cond} unités par boîte)` : ""}. La quantité saisie entre en stock et valide la réception.`,
         onDone: apres,
       });
     } else {
@@ -2538,8 +2547,9 @@
     state.produits.forEach(p => {
       const qty = stockTotal(p); if (!qty) return;
       let v = 0, prixRef = null, src = "";
-      p.lots.forEach(l => { const pu = prixUnitaire(p, l, hist); if (pu) { v += pu.prix * l.qty; if (prixRef == null) { prixRef = pu.prix; src = pu.src; } } });
-      detailValeur.push({ p, qty, prix: prixRef, src, valeur: v });
+      let cond = 1, prixBoite = null;
+      p.lots.forEach(l => { const pu = prixUnitaire(p, l, hist); if (pu) { v += pu.prix * l.qty; if (prixRef == null) { prixRef = pu.prix; src = pu.src; cond = pu.cond; prixBoite = pu.prixBoite; } } });
+      detailValeur.push({ p, qty, prix: prixRef, src, cond, prixBoite, valeur: v });
     });
     detailValeur.sort((a, b) => b.valeur - a.valeur);
     const moisKeys = Object.keys(parMois).sort().reverse().slice(0, 18);
@@ -2586,7 +2596,7 @@
           <div class="price-head"><span>Produit</span><span>Quantité</span><span>Prix unit.</span><span>Valeur</span></div>
           ${detailValeur.map(d => `<div class="price-row"><span data-goto="${d.p.id}" style="cursor:pointer">${esc(d.p.name)}<div class="lot-sub">${esc((categorie(d.p.categorieId) || {}).name || "")}${d.src ? " · prix " + d.src : ""}</div></span>
             <span>${d.qty} <span class="lot-sub">${esc(d.p.unite)}${d.qty > 1 ? "s" : ""}</span></span>
-            <span>${d.prix != null ? fmtEur(d.prix) : '<span style="color:var(--warn)">inconnu</span>'}</span>
+            <span>${d.prix != null ? fmtEur(d.prix) + (d.cond > 1 ? `<div class="lot-sub">${fmtEur(d.prixBoite)} ÷ ${d.cond}</div>` : "") : '<span style="color:var(--warn)">inconnu</span>'}</span>
             <span><b>${fmtEur(d.valeur)}</b></span></div>`).join("")}
           <div class="price-row" style="border-top:2px solid var(--line)"><span><b>Total</b></span><span></span><span></span><span><b>${fmtEur(valeur)}</b></span></div>
         </div>` : '<div class="lot-sub">Aucun produit en stock.</div>'}</div>
