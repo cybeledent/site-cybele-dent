@@ -22,7 +22,8 @@
      ÉTAT
      ========================================================= */
   let state = null;
-  let view = { name: "stock", produitId: null, ficheTab: "stock", search: "" };
+  let view = { name: "accueil", produitId: null, ficheTab: "stock", search: "" };
+  const ico = (name, size) => (window.CybeleIcons ? window.CybeleIcons.ico(name, size) : "");
   const openCats = new Set(); // catégories dépliées (fermées par défaut)
   let cmdTab = "encours";       // sous-onglet de la vue Commandes
   let receptionCtx = null;      // { commandeId } pendant une réception par scan
@@ -476,7 +477,8 @@
       t.classList.toggle("active", view.name === target || (view.name === "fiche" && target === "stock")
         || (view.name === "commande" && target === "commandes"));
     });
-    if (view.name === "stock") renderStock();
+    if (view.name === "accueil") renderAccueil();
+    else if (view.name === "stock") renderStock();
     else if (view.name === "fiche") renderFiche();
     else if (view.name === "scan") renderScan();
     else if (view.name === "courses") renderCourses();
@@ -504,6 +506,98 @@
   }
 
   /* =========================================================
+     VUE : ACCUEIL (tableau de bord)
+     ========================================================= */
+  function prenomUtilisateur() {
+    const email = window.CybeleAuth && window.CybeleAuth.email ? window.CybeleAuth.email() : null;
+    if (!email) return "";
+    const local = email.split("@")[0].split(/[._-]/)[0];
+    return local ? local.charAt(0).toUpperCase() + local.slice(1) : "";
+  }
+  function renderAccueil() {
+    const { besoin, enAttente } = aCommander();
+    const { past, soon } = alertesPeremption();
+    const cmdsEnCours = state.commandesSuivi.filter(c => c.statut !== "archivee").sort((a, b) => (a.date < b.date ? 1 : -1));
+    const aRecevoir = cmdsEnCours.length;
+    const fin = financeStats();
+    const moisNow = todayIso().slice(0, 7), anNow = todayIso().slice(0, 4);
+    const mois6 = derniersMois(6);
+    const maxM = Math.max(1, ...mois6.map(k => fin.parMois[k] || 0));
+    const catKeys = Object.keys(fin.parCat).filter(k => fin.parCat[k] > 0).sort((a, b) => fin.parCat[b] - fin.parCat[a]).slice(0, 4);
+    const sousSeuil = besoin.length + enAttente.length;
+    const nbPerempt = past.length + soon.length;
+    const prenom = prenomUtilisateur();
+    const dateJour = new Date().toLocaleDateString("fr-FR", { weekday: "long", day: "numeric", month: "long" });
+    const ordre = { recue: 0, partielle: 1, attente: 2 };
+    const cmdsTri = cmdsEnCours.slice().sort((a, b) => ordre[a.statut] - ordre[b.statut]);
+    const sousTitre = [];
+    if (aRecevoir) sousTitre.push(`${aRecevoir} livraison${aRecevoir > 1 ? "s" : ""} attendue${aRecevoir > 1 ? "s" : ""}`);
+    if (besoin.length) sousTitre.push(`${besoin.length} produit${besoin.length > 1 ? "s" : ""} à commander`);
+    if (past.length) sousTitre.push(`${past.length} lot${past.length > 1 ? "s" : ""} périmé${past.length > 1 ? "s" : ""}`);
+
+    const kpi = (cls, icon, n, label, nav, extra) => `
+      <button class="kpi" data-go="${nav}" ${extra || ""}>
+        <span class="kpi-ico ${cls}">${ico(icon, 28)}</span>
+        <span class="kpi-n">${n}</span>
+        <span class="kpi-l">${label}</span>
+        <span class="kpi-a">${ico("arrow", 16)}</span>
+      </button>`;
+
+    app.innerHTML = `
+      <div class="hello">
+        <h1>Bonjour${prenom ? " " + esc(prenom) : ""}</h1>
+        <p>${dateJour.charAt(0).toUpperCase() + dateJour.slice(1)}${sousTitre.length ? " · " + sousTitre.join(" · ") : " · tout est en ordre"}</p>
+      </div>
+      <div class="kpis">
+        ${kpi(sousSeuil ? "amber" : "teal", "alert", sousSeuil, `produit${sousSeuil > 1 ? "s" : ""} sous le seuil`, "courses")}
+        ${kpi("teal", "cart", besoin.length, "à commander", "courses")}
+        ${kpi("blue", "truck", aRecevoir, `commande${aRecevoir > 1 ? "s" : ""} à réceptionner`, "commandes")}
+        ${kpi(past.length ? "red" : "purple", "clock", nbPerempt, `péremption${nbPerempt > 1 ? "s" : ""} à surveiller`, "peremption")}
+      </div>
+      <div class="dash-row">
+        <div class="card hero" data-go="finances" role="button">
+          <h3>Valeur du stock <small>temps réel</small></h3>
+          <div class="big">${fmtEur(fin.valeur)}</div>
+          <div class="sub">${state.produits.length} produit${state.produits.length > 1 ? "s" : ""} · ${fmtEur(fin.parMois[moisNow] || 0)} dépensés ce mois-ci · ${fmtEur(fin.parAn[anNow] || 0)} en ${anNow}</div>
+          <div class="bars">${mois6.map(k => `<div class="${k === moisNow ? "on" : ""}" style="height:${Math.max(6, Math.round((fin.parMois[k] || 0) / maxM * 100))}%" title="${moisLabel(k)} : ${fmtEur(fin.parMois[k] || 0)}"><span>${esc(moisLabel(k, true).replace(".", ""))}</span></div>`).join("")}</div>
+          <div class="hero-link">${fin.nbSans ? `<span style="opacity:.85;font-weight:500">${fin.nbSans} produit${fin.nbSans > 1 ? "s" : ""} sans prix connu · </span>` : ""}Voir dépenses &amp; prix ${ico("arrow", 16)}</div>
+        </div>
+        <div class="card">
+          <h3>Commandes en cours <small>${aRecevoir}</small></h3>
+          ${cmdsTri.length ? cmdsTri.slice(0, 3).map(c => {
+            const tot = c.lignes.reduce((t, l) => t + l.qty, 0), rec = c.lignes.reduce((t, l) => t + Math.min(l.recu, l.qty), 0);
+            return `<div class="li li-block" data-open-cmd="${c.id}">
+              <div class="li-top"><div><b>${esc(nomFournisseurCommande(c))}</b><div class="sub">${c.numero ? "n° " + esc(c.numero) + " · " : ""}${fmtEur(montantCommande(c))}</div></div>
+                <span class="pill ${c.statut === "partielle" ? "p-amber" : c.statut === "recue" ? "p-teal" : "p-blue"}">${c.statut === "partielle" ? rec + " / " + tot + " reçus" : c.statut === "recue" ? "À archiver" : "En attente"}</span></div>
+              ${c.statut === "partielle" ? `<div class="prog"><i style="width:${tot ? Math.round(rec / tot * 100) : 0}%"></i></div>` : ""}
+            </div>`; }).join("") : `<div class="sub" style="padding:6px 0 10px">Aucune commande en cours.</div>`}
+          ${cmdsTri.length > 3 ? `<div class="sub" style="padding-top:8px"><a href="#" data-go="commandes">Voir les ${cmdsTri.length} commandes →</a></div>` : ""}
+          <h3 style="margin-top:16px">À commander <small>${besoin.length}</small></h3>
+          ${besoin.length ? besoin.slice(0, 4).map(({ p }) => `<div class="li" data-goto="${p.id}"><span>${esc(p.name)}</span><span class="pill ${stockTotal(p) === 0 ? "p-red" : "p-amber"}">${stockTotal(p)} / ${p.stockIdeal || "?"}</span></div>`).join("")
+            : `<div class="sub" style="padding:6px 0">Rien à commander : tous les stocks sont au-dessus de leur seuil.</div>`}
+          ${besoin.length > 4 ? `<div class="sub" style="padding-top:8px"><a href="#" data-go="courses">Voir la liste complète (${besoin.length}) →</a></div>` : ""}
+        </div>
+        <div class="card">
+          <h3>Péremptions <small>${nbPerempt} lot${nbPerempt > 1 ? "s" : ""}</small></h3>
+          ${nbPerempt ? past.concat(soon).slice(0, 4).map(({ p, l }) => `<div class="li" data-goto="${p.id}"><div><b>${esc(p.name)}</b><div class="sub">${l.qty} ${esc(p.unite)}${l.qty > 1 ? "s" : ""}${l.lot ? " · lot " + esc(l.lot) : ""}</div></div><span class="pill ${l.peremption < todayIso() ? "p-red" : "p-amber"}">${fmtDate(l.peremption).slice(0, 5)}</span></div>`).join("")
+            : `<div class="sub" style="padding:6px 0">Aucun lot périmé ni bientôt périmé.</div>`}
+          ${nbPerempt > 4 ? `<div class="sub" style="padding-top:8px"><a href="#" data-go="peremption">Voir toutes les alertes (${nbPerempt}) →</a></div>` : ""}
+          <h3 style="margin-top:16px">Stock par catégorie <small>valeur</small></h3>
+          ${catKeys.length ? catKeys.map(k => `<div class="li"><span>${esc(k)}</span><b>${fmtEur(fin.parCat[k])}</b></div>`).join("") : `<div class="sub" style="padding:6px 0">Renseignez des prix (ou intégrez des commandes) pour valoriser le stock.</div>`}
+        </div>
+      </div>`;
+
+    app.querySelectorAll("[data-go]").forEach(el => el.onclick = (e) => {
+      e.preventDefault();
+      const t = el.dataset.go;
+      if (t === "finances") { cmdTab = "finances"; switchView("commandes"); }
+      else switchView(t);
+    });
+    app.querySelectorAll("[data-open-cmd]").forEach(el => el.onclick = () => switchView("commande", { commandeId: el.dataset.openCmd }));
+    app.querySelectorAll("[data-goto]").forEach(el => el.onclick = () => switchView("fiche", { produitId: el.dataset.goto }));
+  }
+
+  /* =========================================================
      VUE : STOCK
      ========================================================= */
   function renderStock() {
@@ -512,8 +606,8 @@
     let html = `
       <div class="toolbar">
         <div class="grow"><input class="search-input" id="stock-search" type="search"
-             placeholder="🔍 Rechercher un produit…" value="${esc(view.search)}"></div>
-        <button class="btn ${caveOnly ? "filter-on" : ""}" id="btn-cave-filter" title="N'afficher que les produits rangés (aussi) à la cave">🏠 Cave</button>
+             placeholder="Rechercher un produit…" value="${esc(view.search)}"></div>
+        <button class="btn ${caveOnly ? "filter-on" : ""}" id="btn-cave-filter" title="N'afficher que les produits rangés (aussi) à la cave">${ico("house", 18)} Cave</button>
         <button class="btn btn-primary" id="btn-add-prod">＋ Produit</button>
         <button class="btn" id="btn-add-cat">＋ Catégorie</button>
       </div>`;
@@ -868,7 +962,7 @@
     if (rc) scanMode = "entree";
     app.innerHTML = `
       <div class="scan-wrap">
-        <h2 class="view-title">📷 Scanner</h2>
+        <h2 class="view-title">${ico("scan", 24)} Scanner</h2>
         <p class="view-sub">Visez le petit carré <strong>Datamatrix</strong> (ou le code-barres) de la boîte.
         La péremption et le lot se remplissent tout seuls quand le code les contient.</p>
         ${rc ? `<div class="reception-banner">
@@ -1413,7 +1507,7 @@
   function renderCourses() {
     const { besoin, enAttente } = aCommander();
     let html = `
-      <h2 class="view-title">🛒 Liste de courses</h2>
+      <h2 class="view-title">${ico("cart", 24)} Liste de courses</h2>
       <p class="view-sub">Générée automatiquement dès qu'un stock passe sous son seuil mini.</p>`;
 
     if (!besoin.length && !enAttente.length) {
@@ -1519,7 +1613,7 @@
   function renderPeremption() {
     const { past, soon } = alertesPeremption();
     let html = `
-      <h2 class="view-title">⏰ Alertes péremption</h2>
+      <h2 class="view-title">${ico("clock", 24)} Alertes péremption</h2>
       <p class="view-sub">Concerne les produits où l'alerte est activée (fiche produit → Réglages),
       plus tout lot déjà périmé.</p>`;
 
@@ -1642,7 +1736,7 @@
     const gmailOk = !!(state.gmail && state.gmail.clientId);
 
     let html = `
-      <h2 class="view-title">🚚 Commandes</h2>
+      <h2 class="view-title">${ico("truck", 24)} Commandes</h2>
       <p class="view-sub">Suivi des commandes fournisseurs : réception par scan, reliquats, dépenses et valeur du stock.</p>
       <div class="fiche-tabs">
         <button class="fiche-tab ${cmdTab === "encours" ? "active" : ""}" data-ctab="encours">✉ En cours (${enCours.length})</button>
@@ -2360,26 +2454,15 @@
   /* =========================================================
      DÉPENSES & VALEUR DU STOCK
      ========================================================= */
-  function renderFinances() {
-    const cmds = state.commandesSuivi.slice();
+  // Chiffres financiers partagés (tableau de bord + onglet Dépenses & valeur)
+  function financeStats() {
     const parMois = {}, parAn = {};
-    cmds.forEach(c => {
+    state.commandesSuivi.forEach(c => {
       const m = montantCommande(c); if (!m) return;
       const mois = c.date.slice(0, 7), an = c.date.slice(0, 4);
       parMois[mois] = (parMois[mois] || 0) + m;
       parAn[an] = (parAn[an] || 0) + m;
     });
-    const moisKeys = Object.keys(parMois).sort().reverse().slice(0, 18);
-    const anKeys = Object.keys(parAn).sort().reverse();
-    const maxMois = Math.max(1, ...moisKeys.map(k => parMois[k]));
-    const maxAn = Math.max(1, ...anKeys.map(k => parAn[k]));
-    const moisLabel = (k) => new Date(k + "-01T00:00:00").toLocaleDateString("fr-FR", { month: "long", year: "numeric" });
-    const barre = (label, val, max, sub) => `
-      <div class="bar-row"><div class="bar-label">${label}${sub ? `<div class="lot-sub">${sub}</div>` : ""}</div>
-        <div class="bar-track"><div class="bar-fill" style="width:${Math.max(2, Math.round(val / max * 100))}%"></div></div>
-        <div class="bar-val">${fmtEur(val)}</div></div>`;
-
-    // Valeur du stock
     const hist = lignesPrix();
     let valeur = 0, nbVal = 0, nbSans = 0; const parCat = {}; const sansPrix = [];
     state.produits.forEach(p => {
@@ -2391,6 +2474,28 @@
       const cn = (categorie(p.categorieId) || {}).name || "Sans catégorie";
       parCat[cn] = (parCat[cn] || 0) + vp;
     });
+    return { parMois, parAn, hist, valeur, nbVal, nbSans, parCat, sansPrix };
+  }
+  function moisLabel(k, court) {
+    return new Date(k + "-01T00:00:00").toLocaleDateString("fr-FR", court ? { month: "short" } : { month: "long", year: "numeric" });
+  }
+  // Les 6 derniers mois (clé AAAA-MM), du plus ancien au plus récent
+  function derniersMois(n) {
+    const out = []; const d = new Date(); d.setDate(1);
+    for (let i = n - 1; i >= 0; i--) { const x = new Date(d.getFullYear(), d.getMonth() - i, 1); out.push(localIso(x).slice(0, 7)); }
+    return out;
+  }
+
+  function renderFinances() {
+    const { parMois, parAn, hist, valeur, nbVal, nbSans, parCat, sansPrix } = financeStats();
+    const moisKeys = Object.keys(parMois).sort().reverse().slice(0, 18);
+    const anKeys = Object.keys(parAn).sort().reverse();
+    const maxMois = Math.max(1, ...moisKeys.map(k => parMois[k]));
+    const maxAn = Math.max(1, ...anKeys.map(k => parAn[k]));
+    const barre = (label, val, max, sub) => `
+      <div class="bar-row"><div class="bar-label">${label}${sub ? `<div class="lot-sub">${sub}</div>` : ""}</div>
+        <div class="bar-track"><div class="bar-fill" style="width:${Math.max(2, Math.round(val / max * 100))}%"></div></div>
+        <div class="bar-val">${fmtEur(val)}</div></div>`;
     const catKeys = Object.keys(parCat).sort((a, b) => parCat[b] - parCat[a]);
     const maxCat = Math.max(1, ...catKeys.map(k => parCat[k]));
 
@@ -2482,7 +2587,7 @@
      ========================================================= */
   function renderReglages() {
     app.innerHTML = `
-      <h2 class="view-title">⚙️ Réglages</h2>
+      <h2 class="view-title">${ico("settings", 24)} Réglages</h2>
       <p class="view-sub">Fournisseurs, catégories et sauvegardes.</p>
 
       <div class="card">
@@ -2620,6 +2725,8 @@
   document.getElementById("btn-help").onclick = () => {
     openModal("Aide — CybèleStock", `
       <ul style="margin:0 0 12px 18px; color:var(--muted); line-height:1.8; font-size:.92rem">
+        <li><strong>Accueil</strong> : le tableau de bord — produits sous le seuil, commandes à réceptionner, péremptions,
+          valeur du stock et dépenses. Chaque chiffre est cliquable.</li>
         <li><strong>📦 Stock</strong> : vos produits rangés par catégories. Boutons ＋/− pour les entrées/sorties rapides.
           Le stock idéal et le seuil mini se règlent dans la fiche de chaque produit.</li>
         <li><strong>📷 Scanner</strong> : au téléphone, scannez le Datamatrix des boîtes. Le 1er scan associe le code
@@ -2645,7 +2752,9 @@
      NAVIGATION
      ========================================================= */
   document.querySelectorAll(".nav-tab").forEach(t => t.onclick = () => switchView(t.dataset.nav));
-  document.getElementById("brand-home").onclick = (e) => { e.preventDefault(); switchView("stock"); };
+  document.getElementById("brand-home").onclick = (e) => { e.preventDefault(); switchView("accueil"); };
+  const regMob = document.getElementById("btn-reglages-mobile");
+  if (regMob) regMob.onclick = () => switchView("reglages");
 
   /* =========================================================
      TOASTS
@@ -2784,6 +2893,6 @@
     setTimeout(gmailVerifQuotidienne, 800);
   }
   // Outils de test (aperçu local uniquement)
-  if (/^(localhost|127\.)/.test(location.hostname)) window.CybeleStockDebug = { parseCommandeTexte, htmlToText };
+  if (/^(localhost|127\.)/.test(location.hostname)) window.CybeleStockDebug = { parseCommandeTexte, htmlToText, getState: () => state, setState: (s) => { state = normalize(s); save(); render(); } };
   init();
 })();
