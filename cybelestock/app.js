@@ -2185,10 +2185,10 @@
        sont séparées par « | ». */
     const moneyCell = new RegExp("^" + MONEY + "$", "i");
     const moneyAny = new RegExp(MONEY, "ig");
-    const qtyCell = /^(\d{1,3})\s*(?:u|x|×|pcs?|pi[èe]ces?|unit[ée]s?|unit[ée]\(s\)|bo[iî]tes?|cartons?)?\s*(?:gratuite\(s\)|gratuits?|offerts?)?\s*(?:\([^)]*\))?$/i;
+    const qtyCell = /^(?:[x×]\s*(\d{1,3})|(\d{1,3})\s*(?:u|x|×|pcs?|pi[èe]ces?|unit[ée]s?|unit[ée]\(s\)|bo[iî]tes?|cartons?)?\s*(?:gratuite\(s\)|gratuits?|offerts?)?\s*(?:\([^)]*\))?)$/i;
     const qtySuffix = /\s+×\s*(\d{1,3})(?!\s*(?:ml|cl|mm|cm|m|g|kg|l)\b)(?=\s|$)|\s+x\s*(\d{1,3})\s*$/i;
-    const qtyPrefix = /^(\d{1,3})\s*(?:unit[ée]\(s\)|unit[ée]s?|u|pcs?|pi[èe]ces?)\b/i;
-    const refCell = /^(?=[A-Z0-9\-\/._]*\d)[A-Z0-9][A-Z0-9\-\/._]{2,}$/i;
+    const qtyPrefix = /^(\d{1,3})\s*(?:unit[ée]\(s\)|unit[ée]s?|u|pcs?|pi[èe]ces?)\b(?:\s*(?:gratuite\(s\)|gratuits?|offerts?))?\s*(?:\([^)]*\))?\s*$/i;
+    const refCell = /^(?!\d+(?:[,.]\d+)?(?:mm|cm|ml|cl|g|kg|l|m|x)$)(?=[A-Z0-9\-\/._]*\d)[A-Z0-9][A-Z0-9\-\/._]{2,}$/i;
     const refLabel = /\[?\s*(?:r[ée]f(?:[ée]rence)?\.?|sku|code\s*article)\s*:?\s*(?=[A-Z0-9\-\/._]*\d)([A-Z0-9][A-Z0-9\-\/._]{2,})/i;
     const refOnly = /^\|?\s*\[?\s*(?:r[ée]f(?:[ée]rence)?\.?|sku|code\s*article)\s*:?\s*[A-Z0-9][A-Z0-9\-\/._]{2,}\s*\]?\s*\|?\s*$/i;
     const pctCell = /^\d{1,2}(?:[,.]\d+)?\s*%$/;
@@ -2196,7 +2196,7 @@
     const header = /\b(produits?|articles?|d[ée]signation|description|r[ée]f[ée]rence|qt[ée]|quantit[ée]|prix|total)\b/ig;
     const lines = t.split("\n").map(s => s.trim());
     let pending = [];
-    let dernierSansPrix = null; // article « × N » dont le prix arrive sur une ligne suivante
+    let dernierSansPrix = null, dernierSansPrixAt = -9; // article « × N » dont le prix arrive dans les 2 lignes suivantes
     let ignorerBloc = false;    // ligne de livraison / frais : on ignore ses lignes SKU et prix
 
     const cleanCell = (s) => s.replace(/\s{2,}/g, " ").replace(/^[\s\-–:.,|]+|[\s\-–:.,|]+$/g, "").trim();
@@ -2224,7 +2224,7 @@
 
     for (let i = 0; i < lines.length; i++) {
       const s = lines[i];
-      if (!s || /^[|\s]*$/.test(s)) { pending = []; ignorerBloc = false; continue; }
+      if (!s || /^[|\s]*$/.test(s)) { pending = pending.length ? [pending[pending.length - 1]] : []; ignorerBloc = false; continue; }
       if (/(?:^|[\s|(])-\s?\d+[,.]\d{2}/.test(s)) { pending = []; continue; } // remise (montant négatif)
       // « SKU : XXX » seul sur sa ligne : référence de l'article précédent (ou du suivant), jamais un article
       if (refOnly.test(s)) {
@@ -2233,6 +2233,7 @@
         continue;
       }
       // « SKU : XXX | 15,00 € » : référence + prix de l'article « × N » précédent
+      if (dernierSansPrix && i - dernierSansPrixAt > 2) dernierSansPrix = null;
       if (dernierSansPrix && !ignorerBloc) {
         const cellsR = s.split("|").map(c => c.trim()).filter(Boolean);
         const pr = cellsR.map(prixSeul).filter(v => v != null);
@@ -2255,7 +2256,7 @@
       cells.forEach(c => {
         if (moneyCell.test(c)) prices.push(toNum(c.replace(/[€]|eur\b/ig, "").trim()));
         else if (pctCell.test(c)) return;
-        else if (qtyCell.test(c) && !qty) qty = Number(qtyCell.exec(c)[1]);
+        else if (qtyCell.test(c) && !qty) { const qm = qtyCell.exec(c); qty = Number(qm[1] || qm[2]); }
         else if (refCell.test(c) && !/^\d{1,3}$/.test(c)) ref = c;
         else others.push(c);
       });
@@ -2276,7 +2277,7 @@
       others.forEach((c, k) => { others[k] = cleanCell(c.replace(refLabel, " ")); });
       const textCells = others.filter(c => c && !isNoise(c));
       // Ligne de total / TVA / port sans quantité ni référence : on l'ignore
-      if (!qty && !ref && stop.test(others.join(" "))) { pending = []; continue; }
+      if (!qty && !ref && stop.test(others.join(" "))) { pending = []; dernierSansPrix = null; continue; }
 
       if (qty > 0 && !textCells.length && others.some(c => c && stop.test(c))) { ignorerBloc = true; dernierSansPrix = null; pending = []; continue; }
       const isItem = prices.length > 0 || (qty > 0 && (textCells.length || pending.length));
@@ -2297,11 +2298,14 @@
       if (textCells.length && !pending.length && stop.test(rowText)) continue;
       const namePending = pending.map(cleanCell).filter(p => p && !isNoise(p) && !refLabel.test(p) && !/^option\s*:/i.test(p));
       let desig;
-      if (namePending.length) desig = namePending[namePending.length - 1];
-      else desig = textCells.sort((a, b) => b.length - a.length)[0];
+      if (namePending.length) {
+        desig = namePending[0];
+        const variante = namePending.slice(1).concat(textCells).join(" ").trim();
+        if (variante && variante.length <= 40 && !refCell.test(variante) && !/^[x×]?\s*\d+\s*\]?$/i.test(variante) && !/[\[\]]/.test(variante)) desig += " — " + variante;
+      } else desig = textCells.sort((a, b) => b.length - a.length)[0];
       if (desig && qty === 0) { const mm = qtyPrefix.exec(desig); if (mm) { qty = Number(mm[1]); desig = desig.replace(qtyPrefix, ""); } }
       const cree = pushItem(desig, ref, qty, prices);
-      dernierSansPrix = (cree && !prices.length) ? cree : null;
+      dernierSansPrix = (cree && !prices.length) ? cree : null; dernierSansPrixAt = i;
       pending = [];
     }
 
@@ -2321,6 +2325,10 @@
       }
     }
     draft.lignes.forEach(l => { delete l._brut; delete l._ambigu; });
+    // Un seul article sans prix (ex. AliExpress) : prix déduit du total de la commande
+    if (draft.lignes.length === 1 && !draft.lignes[0].prix && draft.total > 0) {
+      const l = draft.lignes[0]; l.prix = Math.round((draft.total - (draft.fraisPort || 0)) / l.qty * 100) / 100;
+    }
 
     // Dédoublonnage (même désignation + même prix) et plafond
     const seen = new Set();
@@ -2330,7 +2338,7 @@
   function ressembleCommande(text, sujet) {
     const hay = (String(sujet || "") + "\n" + String(text || "")).toLowerCase();
     return /\b(commande|order|bon de commande|confirmation|facture|exp[ée]di[ée]e?|livraison)\b/.test(hay)
-      && (/(?:€\s*)?\d{1,4}[,.]\d{2}\s*(?:€|eur)/i.test(hay) || /\b\d{1,3}\s*unit[ée]/i.test(hay));
+      && (/(?:€\s*)?\d{1,4}[,.]\d{2}\s*(?:€|eur)/i.test(hay) || /\b\d{1,3}\s*unit[ée]/i.test(hay) || /(?:^|\s)[x×]\s?\d{1,3}(?:\s|$)/m.test(hay));
   }
 
   function openCollerMailModal() {
@@ -2440,6 +2448,9 @@
         const text = gmailBody(msg.payload);
         if (!ressembleCommande(text, sujet)) { state.mailsIgnores.push(id); continue; }
         const d = parseCommandeTexte(text, { mailId: id, sujet, from, date });
+        // Même n° qu'une commande déjà suivie (avis d'expédition, relance…) : on ignore
+        if (d.numero && state.commandesSuivi.some(c => c.numero && c.numero.toLowerCase() === d.numero.toLowerCase())) { state.mailsIgnores.push(id); continue; }
+        if (d.numero && drafts.some(x => x.numero && x.numero.toLowerCase() === d.numero.toLowerCase())) { state.mailsIgnores.push(id); continue; }
         d.mailFrom = from;
         drafts.push(d);
       }
