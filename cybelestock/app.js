@@ -2533,6 +2533,15 @@
 
   function renderFinances() {
     const { parMois, parAn, hist, valeur, nbVal, nbSans, parCat, sansPrix } = financeStats();
+    // Détail produit par produit (même calcul que financeStats, mais présenté)
+    const detailValeur = [];
+    state.produits.forEach(p => {
+      const qty = stockTotal(p); if (!qty) return;
+      let v = 0, prixRef = null, src = "";
+      p.lots.forEach(l => { const pu = prixUnitaire(p, l, hist); if (pu) { v += pu.prix * l.qty; if (prixRef == null) { prixRef = pu.prix; src = pu.src; } } });
+      detailValeur.push({ p, qty, prix: prixRef, src, valeur: v });
+    });
+    detailValeur.sort((a, b) => b.valeur - a.valeur);
     const moisKeys = Object.keys(parMois).sort().reverse().slice(0, 18);
     const anKeys = Object.keys(parAn).sort().reverse();
     const maxMois = Math.max(1, ...moisKeys.map(k => parMois[k]));
@@ -2570,6 +2579,17 @@
       <div class="card"><h4>📦 Valeur du stock par catégorie</h4>
         ${catKeys.length ? catKeys.filter(k => parCat[k] > 0).map(k => barre(esc(k), parCat[k], maxCat)).join("") : '<div class="lot-sub">Stock vide ou sans prix.</div>'}
         ${sansPrix.length ? `<div class="lot-sub" style="margin-top:10px">Sans prix connu : ${sansPrix.slice(0, 12).map(p => `<span data-goto="${p.id}" style="cursor:pointer;text-decoration:underline">${esc(p.name)}</span>`).join(", ")}${sansPrix.length > 12 ? "…" : ""} — renseignez un prix indicatif dans la référence, ou intégrez une commande.</div>` : ""}</div>
+      <div class="card"><h4>Détail de la valeur du stock <span class="lot-sub" style="font-weight:500">(pour vérifier le calcul)</span></h4>
+        <p class="lot-sub" style="margin-bottom:8px">Pour chaque produit en stock : quantité × prix unitaire retenu = valeur. Le prix vient de la dernière commande intégrée (« commande »)
+        ou du prix indicatif de la référence (« indicatif »). Cliquez sur un produit pour corriger son prix ou sa quantité.</p>
+        ${detailValeur.length ? `<div class="price-table detail-table">
+          <div class="price-head"><span>Produit</span><span>Quantité</span><span>Prix unit.</span><span>Valeur</span></div>
+          ${detailValeur.map(d => `<div class="price-row"><span data-goto="${d.p.id}" style="cursor:pointer">${esc(d.p.name)}<div class="lot-sub">${esc((categorie(d.p.categorieId) || {}).name || "")}${d.src ? " · prix " + d.src : ""}</div></span>
+            <span>${d.qty} <span class="lot-sub">${esc(d.p.unite)}${d.qty > 1 ? "s" : ""}</span></span>
+            <span>${d.prix != null ? fmtEur(d.prix) : '<span style="color:var(--warn)">inconnu</span>'}</span>
+            <span><b>${fmtEur(d.valeur)}</b></span></div>`).join("")}
+          <div class="price-row" style="border-top:2px solid var(--line)"><span><b>Total</b></span><span></span><span></span><span><b>${fmtEur(valeur)}</b></span></div>
+        </div>` : '<div class="lot-sub">Aucun produit en stock.</div>'}</div>
       <div class="card"><h4>↗ Fourchette de prix d'achat</h4>
         <p class="lot-sub" style="margin-bottom:8px">Prix unitaire le plus bas / le plus haut / dernier payé, d'après les commandes intégrées.</p>
         ${prodKeys.length ? `<div class="price-table">

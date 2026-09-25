@@ -597,3 +597,6 @@ svg.ico { flex-shrink: 0; vertical-align: middle; }
   .dash-row { grid-template-columns: 1fr; gap: 12px; }
   .big { font-size: 1.8rem; }
 }
+
+.detail-table .price-head, .detail-table .price-row { grid-template-columns: 2.2fr .9fr 1fr 1fr; }
+@media (max-width: 700px) { .detail-table .price-head, .detail-table .price-row { grid-template-columns: 1.8fr .8fr .9fr .9fr; } }
