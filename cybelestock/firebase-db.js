@@ -34,6 +34,11 @@
     },
     async save(key, data) {
       await db.collection("modules").doc(key).set({ state: data, ts: Date.now() });
+    },
+    // Lecture avec la date d'enregistrement (points de restauration)
+    async loadFull(key) {
+      const snap = await db.collection("modules").doc(key).get();
+      return snap.exists ? { state: snap.data().state, ts: snap.data().ts || null } : null;
     }
   };
 
