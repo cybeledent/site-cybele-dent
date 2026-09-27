@@ -2142,9 +2142,15 @@
       l.refId = r ? r.id : null;
     }
   }
+  // Nettoyage commun : caractères invisibles (marques bidi, espaces fines), prix « 8 49 € » (Amazon)
+  function normaliserTexteMail(text) {
+    return String(text || "").replace(/[\u200B-\u200F\u202A-\u202E\u2060-\u2064\uFEFF\u00AD\u034F]/g, "")
+      .replace(/[\u00a0\u2009\u202f]/g, " ")
+      .replace(/(\d)\s(\d{2})(?!\d)\s*€/g, "$1,$2 €");
+  }
   function parseCommandeTexte(text, meta) {
     meta = meta || {};
-    const t = String(text || "").replace(/ /g, " ");
+    const t = normaliserTexteMail(text);
     const draft = { source: meta.mailId ? "mail" : "manuel", mailId: meta.mailId || null, mailSujet: meta.sujet || "", lignes: [] };
 
     /* ---- N° de commande : le jeton doit contenir un chiffre ---- */
@@ -2188,13 +2194,14 @@
        sont séparées par « | ». */
     const moneyCell = new RegExp("^" + MONEY + "$", "i");
     const moneyAny = new RegExp(MONEY, "ig");
-    const qtyCell = /^(?:[x×]\s*(\d{1,3})|(\d{1,3})\s*(?:u|x|×|pcs?|pi[èe]ces?|unit[ée]s?|unit[ée]\(s\)|bo[iî]tes?|cartons?)?\s*(?:gratuite\(s\)|gratuits?|offerts?)?\s*(?:\([^)]*\))?)$/i;
+    const qtyCell = /^(?:(?:qt[ée]\.?|quantit[ée])\s*[:\-]?\s*(\d{1,3})|[x×]\s*(\d{1,3})|(\d{1,3})\s*(?:u|x|×|pcs?|pi[èe]ces?|unit[ée]s?|unit[ée]\(s\)|bo[iî]tes?|cartons?)?\s*(?:gratuite\(s\)|gratuits?|offerts?)?\s*(?:\([^)]*\))?)$/i;
     const qtySuffix = /\s+×\s*(\d{1,3})(?!\s*(?:ml|cl|mm|cm|m|g|kg|l)\b)(?=\s|$)|\s+x\s*(\d{1,3})\s*$/i;
     const qtyPrefix = /^(\d{1,3})\s*(?:unit[ée]\(s\)|unit[ée]s?|u|pcs?|pi[èe]ces?)\b(?:\s*(?:gratuite\(s\)|gratuits?|offerts?))?\s*(?:\([^)]*\))?\s*$/i;
     const refCell = /^(?!\d+(?:[,.]\d+)?(?:mm|cm|ml|cl|g|kg|l|m|x)$)(?=[A-Z0-9\-\/._]*\d)[A-Z0-9][A-Z0-9\-\/._]{2,}$/i;
     const refLabel = /\[?\s*(?:r[ée]f(?:[ée]rence)?\.?|sku|code\s*article)\s*:?\s*(?=[A-Z0-9\-\/._]*\d)([A-Z0-9][A-Z0-9\-\/._]{2,})/i;
     const refOnly = /^\|?\s*\[?\s*(?:r[ée]f(?:[ée]rence)?\.?|sku|code\s*article)\s*:?\s*[A-Z0-9][A-Z0-9\-\/._]{2,}\s*\]?\s*\|?\s*$/i;
     const pctCell = /^\d{1,2}(?:[,.]\d+)?\s*%$/;
+    const habillage = /^(?:vendu\s+par\b|exp[ée]di[ée]\s+par\b|[ée]tat\s*:|consulter\b|modifier\b|suivre\b|voir\s+(?:les|la|le)\b|g[ée]rer\b|afficher\b|acheter\b|retour\b|merci\b|pour\s+le\s+compte\b|n[°oº]\s*de\s*commande\b)/i;
     const stop = /(?<![a-z0-9])(sous[\s\-]?total|total|tva|t\.v\.a|taxes?|frais|port|exp[ée]dition|livraison|emballage|participation|remise|rabais|r[ée]duction|[ée]conomis[ée]|coupon|code\s*promo|promo|importation|douane|montant|paiement|pay[ée]e?\s*(?:le|sur|par)|mastercard|visa|carte\s*bancaire|adresse|t[ée]l(?:[ée]phone)?|iban|siret|rpps|num[ée]ro\s*de\s*client|r[ée]sum[ée]|r[ée]capitulatif|d[ée]tail\s*de\s*(?:la\s*)?commande)(?![a-z0-9])/i;
     const header = /\b(produits?|articles?|d[ée]signation|description|r[ée]f[ée]rence|qt[ée]|quantit[ée]|prix|total)\b/ig;
     const lines = t.split("\n").map(s => s.trim());
@@ -2203,7 +2210,7 @@
     let ignorerBloc = false;    // ligne de livraison / frais : on ignore ses lignes SKU et prix
 
     const cleanCell = (s) => s.replace(/\s{2,}/g, " ").replace(/^[\s\-–:.,|]+|[\s\-–:.,|]+$/g, "").trim();
-    const isNoise = (s) => !s || s.length < 3 || /^\d+$/.test(s) || pctCell.test(s) || moneyCell.test(s) || stop.test(s) || /@|https?:\/\//i.test(s);
+    const isNoise = (s) => !s || s.length < 3 || /^\d+$/.test(s) || pctCell.test(s) || moneyCell.test(s) || stop.test(s) || /\S+@\S+\.\S+|https?:\/\//i.test(s);
 
     function pushItem(desig, ref, qty, prices, rawRef) {
       desig = cleanCell(desig || "");
@@ -2227,7 +2234,7 @@
 
     for (let i = 0; i < lines.length; i++) {
       const s = lines[i];
-      if (!s || /^[|\s]*$/.test(s)) { pending = pending.length ? [pending[pending.length - 1]] : []; ignorerBloc = false; continue; }
+      if (!s || /^[|\s]*$/.test(s)) { pending = pending.length ? [pending[pending.length - 1]] : []; ignorerBloc = false; if (dernierSansPrix) dernierSansPrixAt++; continue; } // ligne vide : ne compte pas dans la distance
       if (/(?:^|[\s|(])-\s?\d+[,.]\d{2}/.test(s)) { pending = []; continue; } // remise (montant négatif)
       if (/\*{3,}\d{2,}|\d{2,}\*{3,}/.test(s)) { pending = []; dernierSansPrix = null; continue; } // numéro de carte masqué
       // « SKU : XXX » seul sur sa ligne : référence de l'article précédent (ou du suivant), jamais un article
@@ -2260,7 +2267,7 @@
       cells.forEach(c => {
         if (moneyCell.test(c)) prices.push(toNum(c.replace(/[€]|eur\b/ig, "").trim()));
         else if (pctCell.test(c)) return;
-        else if (qtyCell.test(c) && !qty) { const qm = qtyCell.exec(c); qty = Number(qm[1] || qm[2]); }
+        else if (qtyCell.test(c) && !qty) { const qm = qtyCell.exec(c); qty = Number(qm[1] || qm[2] || qm[3]); }
         else if (refCell.test(c) && !/^\d{1,3}$/.test(c)) ref = c;
         else others.push(c);
       });
@@ -2288,7 +2295,8 @@
       if (!isItem) {
         // Ligne de texte simple : candidate « nom de produit » pour la ligne suivante
         if (/^\|/.test(s)) pending = []; // début d'une nouvelle ligne de tableau
-        if (!stop.test(s) && !/@|https?:\/\//i.test(s)) { pending.push(s.replace(/^\|\s*/, "")); if (pending.length > 3) pending.shift(); }
+        if (habillage.test(s.replace(/^\|\s*/, ""))) continue; // « Vendu par… », boutons : ni nom ni variante
+        if (!stop.test(s) && !/\S+@\S+\.\S+|https?:\/\//i.test(s)) { pending.push(s.replace(/^\|\s*/, "")); if (pending.length > 3) pending.shift(); }
         else pending = [];
         continue;
       }
@@ -2340,8 +2348,8 @@
     return draft;
   }
   function ressembleCommande(text, sujet) {
-    const hay = (String(sujet || "") + "\n" + String(text || "")).toLowerCase();
-    return /\b(commande|order|bon de commande|confirmation|facture|exp[ée]di[ée]e?|livraison)\b/.test(hay)
+    const hay = normaliserTexteMail(String(sujet || "") + "\n" + String(text || "")).toLowerCase();
+    return /\b(command[ée]s?|commande|order|bon de commande|confirmation|facture|exp[ée]di[ée]e?|livraison)\b/.test(hay)
       && (/(?:€\s*)?\d{1,4}[,.]\d{2}\s*(?:€|eur)/i.test(hay) || /\b\d{1,3}\s*unit[ée]/i.test(hay) || /(?:^|\s)[x×]\s?\d{1,3}(?:\s|$)/m.test(hay));
   }
 
@@ -2997,6 +3005,6 @@
     setTimeout(gmailVerifQuotidienne, 800);
   }
   // Outils de test (aperçu local uniquement)
-  if (/^(localhost|127\.)/.test(location.hostname)) window.CybeleStockDebug = { parseCommandeTexte, htmlToText, getState: () => state, setState: (s) => { state = normalize(s); save(); render(); } };
+  if (/^(localhost|127\.)/.test(location.hostname)) window.CybeleStockDebug = { parseCommandeTexte, htmlToText, normaliserTexteMail, getState: () => state, setState: (s) => { state = normalize(s); save(); render(); } };
   init();
 })();
