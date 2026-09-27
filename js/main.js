@@ -101,6 +101,7 @@ document.addEventListener("DOMContentLoaded", function () {
       if (c) c.focus();
     }
     function closeSoin() {
+      modal.querySelectorAll("video").forEach(function (v) { v.pause(); });
       modal.hidden = true;
       document.body.classList.remove("modal-open");
       if (lastFocused) lastFocused.focus();
