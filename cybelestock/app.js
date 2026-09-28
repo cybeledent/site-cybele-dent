@@ -1065,6 +1065,8 @@
       if (scanMode === "sortie") openSortieModal(match.p.id, { scanned: parsed, refId: match.r.id });
       else if (receptionCtx) receptionScan(match.p.id, match.r.id, parsed);
       else openEntreeModal(match.p.id, { scanned: parsed, refId: match.r.id });
+    } else if (receptionCtx && scanMode !== "sortie" && commandeSuivi(receptionCtx.commandeId)) {
+      openReceptionAssociateModal(parsed, commandeSuivi(receptionCtx.commandeId));
     } else {
       openAssociateModal(parsed);
     }
@@ -1930,6 +1932,80 @@
                  : `⚠ « ${esc(p ? p.name : "?")} » ne figure pas dans la commande ${esc(c.numero || "")}. L'entrée sera ajoutée au stock hors commande.`,
       onDone: () => { render(); toast("Entrée hors commande ajoutée au stock."); },
     });
+  }
+
+  // Code inconnu scanné pendant une réception : on propose seulement les
+  // lignes de la commande encore attendues. Si la ligne n'est pas encore
+  // un produit du stock, le produit est créé (catégorie à choisir) avec sa
+  // référence fournisseur, son prix et le code scanné.
+  function openReceptionAssociateModal(parsed, c) {
+    const lignes = c.lignes.filter(l => l.recu < l.qty);
+    const fournId = c.fournisseurId || "";
+    openModal("Code inconnu — quel article de la commande ?", `
+      <div class="scan-result-prod">
+        <div class="p-name">📷 Réception de la commande ${esc(c.numero || "")}${c.fournisseurNom || fournId ? " · " + esc(nomFournisseurCommande(c)) : ""}</div>
+        <div class="p-sub">code ${esc(parsed.gtin)}${parsed.peremption ? " · péremption " + fmtDate(parsed.peremption) : ""}${parsed.lot ? " · lot " + esc(parsed.lot) : ""} — ce code n'est associé à aucun produit.</div>
+      </div>
+      <div class="field full"><label>À quelle ligne de la commande correspond cette boîte ?</label></div>
+      <div id="ra-list" class="as-list">
+        ${lignes.length ? lignes.map(l => {
+          const p = l.produitId ? produit(l.produitId) : null;
+          return `<button type="button" class="as-item" data-pick="${l.id}">${esc(nomLigne(l))}
+            <div class="as-cat">${Math.max(0, l.qty - l.recu)} attendu${l.qty - l.recu > 1 ? "s" : ""}${l.ref ? " · réf " + esc(l.ref) : ""}${l.prix ? " · " + fmtEur(l.prix) : ""}
+            ${p ? " · produit du stock : " + esc(p.name) : ' · <span class="cmd-unlinked">nouveau produit à créer</span>'}</div></button>`;
+        }).join("") : '<div class="as-cat" style="padding:12px">Toutes les lignes de cette commande sont déjà reçues.</div>'}
+      </div>
+      <div id="ra-new" hidden style="margin-top:12px">
+        <div class="form-grid">
+          <div class="field full"><label>Nom du nouveau produit</label><input id="ra-name"></div>
+          <div class="field"><label>Catégorie</label>
+            <select id="ra-cat">${state.categories.map(cat => `<option value="${cat.id}">${esc(cat.name)}</option>`).join("")}</select></div>
+          <div class="field"><label>Unité</label><input id="ra-unite" value="boîte"></div>
+        </div>
+        <p class="field-hint" style="margin-top:6px">Le produit sera créé avec la référence, le prix de la commande et ce code — vous réglerez son stock idéal et son seuil plus tard dans sa fiche.</p>
+      </div>`,
+      `<button class="btn" data-cancel style="justify-content:center">Annuler</button>
+       <button class="btn" data-all style="justify-content:center">Autre produit du stock…</button>
+       <button class="btn btn-primary" data-ok style="flex:1;justify-content:center" disabled>Valider</button>`);
+    const listEl = document.getElementById("ra-list"), newEl = document.getElementById("ra-new");
+    const okBtn = modalRoot.querySelector("[data-ok]");
+    let chosen = null;
+    listEl.querySelectorAll("[data-pick]").forEach(b => b.onclick = () => {
+      chosen = lignes.find(l => l.id === b.dataset.pick);
+      listEl.querySelectorAll(".as-item").forEach(x => x.classList.toggle("sel", x === b));
+      const p = chosen.produitId ? produit(chosen.produitId) : null;
+      newEl.hidden = !!p;
+      if (!p) { const n = document.getElementById("ra-name"); if (!n.value) n.value = nomLigne(chosen); }
+      okBtn.disabled = false;
+      okBtn.textContent = p ? "Associer et recevoir" : "Créer le produit et recevoir";
+    });
+    modalRoot.querySelector("[data-cancel]").onclick = closeModal;
+    modalRoot.querySelector("[data-all]").onclick = () => { closeModal(); openAssociateModal(parsed); };
+    okBtn.onclick = () => {
+      if (!chosen) return;
+      let p = chosen.produitId ? produit(chosen.produitId) : null;
+      if (!p) {
+        const name = document.getElementById("ra-name").value.trim();
+        if (!name) { toast("Donnez un nom au produit."); return; }
+        p = { id: uid(), categorieId: document.getElementById("ra-cat").value, name,
+          unite: document.getElementById("ra-unite").value.trim() || "boîte", stockIdeal: 0, seuilMini: 0,
+          alertePeremption: !!parsed.peremption, delaiAlerteMois: 3, enCave: false, note: "", references: [], lots: [] };
+        state.produits.push(p);
+        chosen.produitId = p.id; chosen.refId = null;
+      }
+      // Référence : celle de la ligne, sinon celle du fournisseur de la commande, sinon nouvelle
+      let r = chosen.refId ? reference(p, chosen.refId) : null;
+      if (!r && fournId) r = p.references.find(x => x.fournisseurId === fournId && (!chosen.ref || normRef(x.ref) === normRef(chosen.ref))) || null;
+      if (!r) {
+        r = { id: uid(), fournisseurId: fournId, ref: chosen.ref || "", designation: chosen.designation || "", url: "", note: "",
+          prix: chosen.prix ? String(chosen.prix).replace(".", ",") : "", cond: 1, gtins: [] };
+        p.references.push(r);
+      } else if (!parsePrix(r.prix) && chosen.prix) { r.prix = String(chosen.prix).replace(".", ","); }
+      if (!r.gtins.some(g => normGtin(g) === normGtin(parsed.gtin))) r.gtins.push(parsed.gtin);
+      chosen.refId = r.id;
+      save(); closeModal();
+      recevoirLigne(c, chosen.id, parsed);
+    };
   }
 
   function proposerArchivage(c) {
