@@ -18,6 +18,7 @@ Site vitrine du cabinet dentaire **Cybèle Dent**, 8 rue Calixte II, 38200 Vienn
 | `implant-dentaire-vienne.html` | Page détaillée : implants dentaires |
 | `pedodontie-dentiste-enfant-vienne.html` | Page détaillée : pédodontie (dentiste pour enfants) |
 | `eclaircissement-dentaire-vienne.html` | Page détaillée : éclaircissement dentaire |
+| `urgence-dentaire-vienne.html` | Page détaillée : urgence dentaire (douleur, abcès, dent cassée) |
 | `contact.html` | Coordonnées, horaires et plan |
 | `css/style.css` | Mise en forme |
 | `js/main.js` | Menu, animations |
@@ -46,7 +47,7 @@ Restent **provisoires** à remplacer (« Rechercher / Remplacer » dans tous les
 ## 🔎 Référencement (SEO) — déjà en place
 
 - **Une page par soin** (implants, pédodontie, parodontologie, endodontie, prothèses,
-  prévention, caries, éclaircissement). Auparavant, le détail des soins s'ouvrait dans une
+  prévention, caries, éclaircissement, urgences). Auparavant, le détail des soins s'ouvrait dans une
   fenêtre sur la page « Nos soins » : ce contenu caché n'était pas référencé comme une page
   à part entière. Chaque soin a désormais sa propre adresse, son titre, sa description, un
   texte visible enrichi (déroulement, questions fréquentes) et des données structurées Google,
