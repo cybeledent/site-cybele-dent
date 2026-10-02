@@ -22,6 +22,9 @@ Site vitrine du cabinet dentaire **Cybèle Dent**, 8 rue Calixte II, 38200 Vienn
 | `pedodontie-dentiste-enfant-vienne.html` | Page détaillée : pédodontie (dentiste pour enfants) |
 | `eclaircissement-dentaire-vienne.html` | Page détaillée : éclaircissement dentaire |
 | `urgence-dentaire-vienne.html` | Page détaillée : urgence dentaire (douleur, abcès, dent cassée) |
+| `gouttiere-bruxisme-apnee-sommeil-vienne.html` | Page détaillée : gouttière de bruxisme et orthèse d'apnée du sommeil |
+| `tarifs-remboursement-dentiste-vienne.html` | Tarifs et remboursements (conventionnement, carte Vitale, tiers payant, 100 % Santé, devis) |
+| `en/index.html` | Page de présentation en anglais (visiteurs étrangers), liée à l'accueil |
 | `contact.html` | Coordonnées, horaires et plan |
 | `css/style.css` | Mise en forme |
 | `js/main.js` | Menu, animations |

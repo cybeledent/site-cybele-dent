@@ -14,6 +14,9 @@
   <meta name="geo.position" content="45.5256;4.8743">
   <meta name="ICBM" content="45.5256, 4.8743">
   <link rel="canonical" href="https://www.cybele-dent.fr/">
+  <link rel="alternate" hreflang="fr" href="https://www.cybele-dent.fr/">
+  <link rel="alternate" hreflang="en" href="https://www.cybele-dent.fr/en/">
+  <link rel="alternate" hreflang="x-default" href="https://www.cybele-dent.fr/">
   <link rel="icon" href="assets/logo.svg" type="image/svg+xml">
   <link rel="preload" as="image" href="assets/cathedrale-vienne.jpg">
   <!-- Réseaux sociaux (Open Graph) -->
@@ -86,6 +89,7 @@
     "areaServed": [{"@type": "City", "name": "Vienne"}, {"@type": "City", "name": "Pont-Évêque"}, {"@type": "City", "name": "Estrablin"}, {"@type": "City", "name": "Seyssuel"}, {"@type": "City", "name": "Chasse-sur-Rhône"}, {"@type": "City", "name": "Chuzelles"}, {"@type": "City", "name": "Serpaize"}, {"@type": "City", "name": "Jardin"}, {"@type": "City", "name": "Reventin-Vaugris"}, {"@type": "City", "name": "Chonas-l'Amballe"}, {"@type": "City", "name": "Saint-Romain-en-Gal"}, {"@type": "City", "name": "Sainte-Colombe"}, {"@type": "City", "name": "Condrieu"}],
     "medicalSpecialty": ["Dentistry", "Periodontic", "Endodontic", "Pediatric"],
     "slogan": "Votre sourire, notre engagement",
+    "knowsLanguage": ["fr", "en"],
     "availableService": [
       { "@type": "MedicalProcedure", "name": "Bilan bucco-dentaire (BBD) et prévention", "url": "https://www.cybele-dent.fr/prevention-dentaire-vienne.html" },
       { "@type": "MedicalProcedure", "name": "Soins dentaires et traitement des caries", "url": "https://www.cybele-dent.fr/soins-dentaires-carie-vienne.html" },
@@ -95,7 +99,8 @@
       { "@type": "MedicalProcedure", "name": "Implantologie dentaire", "url": "https://www.cybele-dent.fr/implant-dentaire-vienne.html" },
       { "@type": "MedicalProcedure", "name": "Pédodontie – dentiste pour enfants (3 à 16 ans)", "url": "https://www.cybele-dent.fr/pedodontie-dentiste-enfant-vienne.html" },
       { "@type": "MedicalProcedure", "name": "Éclaircissement dentaire", "url": "https://www.cybele-dent.fr/eclaircissement-dentaire-vienne.html" },
-      { "@type": "MedicalProcedure", "name": "Urgences dentaires", "url": "https://www.cybele-dent.fr/urgence-dentaire-vienne.html" }
+      { "@type": "MedicalProcedure", "name": "Urgences dentaires", "url": "https://www.cybele-dent.fr/urgence-dentaire-vienne.html" },
+      { "@type": "MedicalProcedure", "name": "Gouttière de bruxisme et orthèse d'avancée mandibulaire (apnée du sommeil)", "url": "https://www.cybele-dent.fr/gouttiere-bruxisme-apnee-sommeil-vienne.html" }
     ],
     "openingHoursSpecification": [
       { "@type": "OpeningHoursSpecification", "dayOfWeek": ["Monday", "Tuesday", "Thursday", "Friday"], "opens": "08:30", "closes": "13:00" },
@@ -153,6 +158,22 @@
     },
     {
       "@type": "Question",
+      "name": "Parlez-vous anglais ? / Do you speak English?",
+      "acceptedAnswer": {
+        "@type": "Answer",
+        "text": "Oui, l'équipe parle anglais : les patients étrangers, expatriés ou de passage à Vienne sont les bienvenus. Une page de présentation en anglais est disponible sur le site (lien « English » en haut de page)."
+      }
+    },
+    {
+      "@type": "Question",
+      "name": "Êtes-vous conventionnés ? Comment sont remboursés les soins ?",
+      "acceptedAnswer": {
+        "@type": "Answer",
+        "text": "Oui, le cabinet est conventionné avec l'Assurance Maladie : les soins courants sont facturés aux tarifs de la convention et remboursés avec votre carte Vitale et votre mutuelle. Les prothèses, implants et traitements non remboursés font l'objet d'un devis détaillé remis avant tout traitement. Tout est détaillé sur notre page Tarifs et remboursements."
+      }
+    },
+    {
+      "@type": "Question",
       "name": "Où se trouve le cabinet et comment venir ?",
       "acceptedAnswer": {
         "@type": "Answer",
@@ -173,7 +194,7 @@
         <span>📞 <a href="tel:+33422979765">04 22 97 97 65</a></span>
         <span>✉️ <a href="mailto:cybeledent@gmail.com">cybeledent@gmail.com</a></span>
       </div>
-      <div><a href="https://www.doctolib.fr/cabinet-dentaire/vienne/cybele-dent" target="_blank" rel="noopener">Prendre rendez-vous en ligne →</a></div>
+      <div class="topbar-right"><a href="en/" hreflang="en" lang="en">English</a><a href="https://www.doctolib.fr/cabinet-dentaire/vienne/cybele-dent" target="_blank" rel="noopener">Prendre rendez-vous en ligne →</a></div>
     </div>
   </div>
 
@@ -191,6 +212,7 @@
         <li><a href="salles.html">Le cabinet</a></li>
         <li><a href="actes.html">Nos soins</a></li>
         <li><a href="contact.html">Contact</a></li>
+        <li><a href="tarifs-remboursement-dentiste-vienne.html">Tarifs</a></li>
         <li class="nav-cta"><a class="btn btn-primary" href="https://www.doctolib.fr/cabinet-dentaire/vienne/cybele-dent" target="_blank" rel="noopener">Prise de rendez-vous</a></li>
       </ul>
     </div>
@@ -313,6 +335,7 @@
         <a class="card card-body card-link reveal" href="pedodontie-dentiste-enfant-vienne.html"><h3>🧒 Dentiste pour enfants (pédodontie)</h3><p>Dentiste pédiatrique de 3 à 16 ans, en douceur.</p><span class="more">En savoir plus →</span></a>
         <a class="card card-body card-link reveal" href="eclaircissement-dentaire-vienne.html"><h3>✨ Éclaircissement dentaire</h3><p>Un sourire plus lumineux, en toute sécurité.</p><span class="more">En savoir plus →</span></a>
         <a class="card card-body card-link reveal" href="urgence-dentaire-vienne.html"><h3>🚨 Urgence dentaire</h3><p>Douleur, abcès, dent cassée : nous vous recevons vite.</p><span class="more">En savoir plus →</span></a>
+        <a class="card card-body card-link reveal" href="gouttiere-bruxisme-apnee-sommeil-vienne.html"><h3>😴 Bruxisme et apnée du sommeil</h3><p>Gouttière de nuit et orthèse d'avancée mandibulaire.</p><span class="more">En savoir plus →</span></a>
       </div>
       <div class="center" style="margin-top:36px;">
         <a class="btn btn-outline" href="actes.html">Voir le détail des soins →</a>
@@ -397,6 +420,14 @@
             <div class="faq-body"><p>Aux heures d'ouverture, appelez le cabinet au 04 22 97 97 65 : nous faisons le maximum pour vous recevoir dans la journée. Le dimanche et les jours fériés, appelez le 15 (SAMU) pour joindre le chirurgien-dentiste de garde.</p></div>
           </details>
           <details class="faq">
+            <summary>Parlez-vous anglais ? / Do you speak English?</summary>
+            <div class="faq-body"><p>Oui, l'équipe parle anglais : les patients étrangers, expatriés ou de passage à Vienne sont les bienvenus. Une page de présentation en anglais est disponible sur le site (lien « English » en haut de page).</p></div>
+          </details>
+          <details class="faq">
+            <summary>Êtes-vous conventionnés ? Comment sont remboursés les soins ?</summary>
+            <div class="faq-body"><p>Oui, le cabinet est conventionné avec l'Assurance Maladie : les soins courants sont facturés aux tarifs de la convention et remboursés avec votre carte Vitale et votre mutuelle. Les prothèses, implants et traitements non remboursés font l'objet d'un devis détaillé remis avant tout traitement. Tout est détaillé sur notre page Tarifs et remboursements. <a href="tarifs-remboursement-dentiste-vienne.html">Voir la page →</a></p></div>
+          </details>
+          <details class="faq">
             <summary>Où se trouve le cabinet et comment venir ?</summary>
             <div class="faq-body"><p>Le cabinet est situé 8 rue Calixte II, à Vienne (38200), en plein centre historique, à deux pas de la cathédrale Saint-Maurice et à quelques minutes à pied de la gare de Vienne. Il est ouvert du lundi au vendredi.</p></div>
           </details>
@@ -434,6 +465,7 @@
           <li><a href="salles.html">Le cabinet</a></li>
           <li><a href="actes.html">Nos soins</a></li>
           <li><a href="contact.html">Contact</a></li>
+          <li><a href="tarifs-remboursement-dentiste-vienne.html">Tarifs et remboursements</a></li>
         </ul>
       </div>
       <div>
@@ -448,6 +480,7 @@
           <li><a href="pedodontie-dentiste-enfant-vienne.html">Dentiste pour enfants (pédodontie)</a></li>
           <li><a href="eclaircissement-dentaire-vienne.html">Éclaircissement dentaire</a></li>
           <li><a href="urgence-dentaire-vienne.html">Urgence dentaire</a></li>
+          <li><a href="gouttiere-bruxisme-apnee-sommeil-vienne.html">Bruxisme et apnée du sommeil</a></li>
         </ul>
       </div>
       <div>
