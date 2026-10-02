@@ -27,26 +27,6 @@ document.addEventListener("DOMContentLoaded", function () {
     window.addEventListener("scroll", onScroll, { passive: true });
   }
 
-  /* ---- Accordéon des actes ---- */
-  document.querySelectorAll(".act-head").forEach(function (head) {
-    head.addEventListener("click", function () {
-      const act  = head.closest(".act");
-      const body = act.querySelector(".act-body");
-      const open = act.classList.contains("open");
-
-      // referme les autres
-      document.querySelectorAll(".act.open").forEach(function (o) {
-        o.classList.remove("open");
-        o.querySelector(".act-body").style.maxHeight = null;
-      });
-
-      if (!open) {
-        act.classList.add("open");
-        body.style.maxHeight = body.scrollHeight + "px";
-      }
-    });
-  });
-
   /* ---- Apparition au scroll ---- */
   const reveals = document.querySelectorAll(".reveal");
   if ("IntersectionObserver" in window && reveals.length) {
@@ -86,37 +66,9 @@ document.addEventListener("DOMContentLoaded", function () {
     parcours.querySelectorAll(".pstep").forEach(function (st) { st.classList.add("visible"); });
   }
 
-  /* ---- Fiches détaillées des soins (fenêtre modale) ---- */
-  var modal = document.getElementById("soinModal");
-  if (modal) {
-    var content = modal.querySelector(".soin-modal-content");
-    var lastFocused = null;
-    function openSoin(card) {
-      var detail = card.querySelector(".soin-detail");
-      content.innerHTML = detail ? detail.innerHTML : "";
-      lastFocused = card;
-      modal.hidden = false;
-      document.body.classList.add("modal-open");
-      var c = modal.querySelector(".soin-modal-close");
-      if (c) c.focus();
-    }
-    function closeSoin() {
-      modal.querySelectorAll("video").forEach(function (v) { v.pause(); });
-      modal.hidden = true;
-      document.body.classList.remove("modal-open");
-      if (lastFocused) lastFocused.focus();
-    }
-    document.querySelectorAll(".soin-card").forEach(function (card) {
-      card.addEventListener("click", function () { openSoin(card); });
-      card.addEventListener("keydown", function (e) {
-        if (e.key === "Enter" || e.key === " ") { e.preventDefault(); openSoin(card); }
-      });
-    });
-    modal.querySelector(".soin-modal-close").addEventListener("click", closeSoin);
-    modal.querySelector(".soin-modal-backdrop").addEventListener("click", closeSoin);
-    document.addEventListener("keydown", function (e) {
-      if (e.key === "Escape" && !modal.hidden) closeSoin();
-    });
+  /* ---- Page affichée dans un cadre (aperçu, intégration) : on remonte en haut à l'ouverture ---- */
+  if (window.self !== window.top && !window.location.hash) {
+    try { document.documentElement.scrollIntoView({ block: "start", behavior: "instant" }); } catch (e) { /* ignoré */ }
   }
 
   /* ---- Année dans le pied de page ---- */
