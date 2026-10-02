@@ -30,19 +30,18 @@ Double-cliquez simplement sur **`index.html`** : il s'ouvre dans votre navigateu
 
 ## ✏️ À personnaliser (important)
 
-Déjà renseignés : ✅ téléphone `04 58 28 36 82`, ✅ horaires (lun/mar/jeu/ven 8h30–18h),
+Déjà renseignés : ✅ téléphone `04 22 97 97 65`, ✅ e-mail `cybeledent@gmail.com`, ✅ horaires (lun/mar/jeu/ven 8h30–18h, mer 9h–13h / 14h–19h),
 ✅ noms des praticiennes (Dr Filipputti, Dr Agosto).
 
 Restent **provisoires** à remplacer (« Rechercher / Remplacer » dans tous les `.html`) :
 
-1. **E-mail** — remplacer `contact@cybele-dent.fr` par l'adresse réelle.
-2. **Lien de prise de rendez-vous** — remplacer `https://www.doctolib.fr`
+1. **Lien de prise de rendez-vous** — remplacer `https://www.doctolib.fr`
    par votre vrai lien (Doctolib, Maiia, etc.).
-3. **Nom de domaine** — pour le référencement, remplacer `https://www.cybele-dent.fr`
+2. **Nom de domaine** — pour le référencement, remplacer `https://www.cybele-dent.fr`
    par votre vrai domaine dans : `sitemap.xml`, `robots.txt`, et les balises
    `canonical` / `og:` / données structurées de chaque page `.html`.
-4. **Autres membres de l'équipe** (assistantes, secrétariat) — compléter `equipe.html`.
-5. **Photos des salles** — voir ci-dessous.
+3. **Autres membres de l'équipe** (assistantes, secrétariat) — compléter `equipe.html`.
+4. **Photos des salles** — voir ci-dessous.
 
 ## 🔎 Référencement (SEO) — déjà en place
 
