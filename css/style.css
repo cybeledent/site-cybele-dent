@@ -222,6 +222,7 @@ section { padding: 84px 0; }
 .member-photo .placeholder { color: var(--teal); font-size: 3.2rem; }
 .member-body { padding: 20px 22px; text-align: center; }
 .member-body .role { color: var(--sand-dark); font-weight: 600; font-size: .92rem; display: block; margin-bottom: 6px; }
+.member-body .more { display: block; margin-top: 12px; }
 .member-tag {
   display:inline-block; margin-top:10px; font-size:.78rem; background:var(--teal-light);
   color:var(--teal-dark); padding:4px 12px; border-radius:999px;
@@ -415,6 +416,7 @@ section { padding: 84px 0; }
 .soin-aside { position: sticky; top: 92px; display: grid; gap: 22px; }
 .aside-photo { border-radius: var(--radius); overflow: hidden; box-shadow: var(--shadow-soft); aspect-ratio: 4 / 3; }
 .aside-photo img { width: 100%; height: 100%; object-fit: cover; }
+.aside-photo.square { aspect-ratio: 1 / 1; }
 .aside-card { background: #fff; border: 1px solid #eef3f3; border-radius: var(--radius); box-shadow: var(--shadow-soft); padding: 24px; }
 .aside-card h3 { font-size: 1.05rem; margin-bottom: 12px; }
 .aside-cta p { color: var(--muted); font-size: .95rem; margin-bottom: 6px; }
