@@ -66,6 +66,11 @@ document.addEventListener("DOMContentLoaded", function () {
     parcours.querySelectorAll(".pstep").forEach(function (st) { st.classList.add("visible"); });
   }
 
+  /* ---- Page affichée dans un cadre (aperçu, intégration) : on remonte en haut à l'ouverture ---- */
+  if (window.self !== window.top && !window.location.hash) {
+    try { document.documentElement.scrollIntoView({ block: "start", behavior: "instant" }); } catch (e) { /* ignoré */ }
+  }
+
   /* ---- Année dans le pied de page ---- */
   const y = document.getElementById("year");
   if (y) y.textContent = new Date().getFullYear();
