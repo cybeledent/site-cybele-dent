@@ -56,6 +56,14 @@ Restent **provisoires** à remplacer (« Rechercher / Remplacer » dans tous les
   partie `<article class="soin-main">` (les titres `<h2>`, les paragraphes `<p>`, la liste
   d'étapes `<ol class="steps">` et les questions `<details class="faq">`). Pensez à mettre à
   jour la date `<lastmod>` de la page dans `sitemap.xml`.
+- **Accueil** : bloc « Dentiste à Vienne pour les adultes et les enfants » (prise de rendez-vous
+  Doctolib : adultes avec les Dr Filipputti ou Agosto, enfants de 3 à 16 ans avec Clotilde Péaut),
+  liste des communes voisines desservies et questions fréquentes balisées pour Google.
+- Données structurées sur chaque page : fil d'Ariane, fiche du cabinet avec horaires (contact),
+  fiches des praticiennes (équipe), soin + questions fréquentes (pages de soins).
+- Photos optimisées : la photo de la cathédrale (fond des pages) a été compressée de 7,6 Mo à
+  moins de 1 Mo pour accélérer le chargement, critère de classement Google. Si vous remplacez une
+  photo, visez moins de 500 Ko (format JPEG, 1600 à 1800 px de large).
 - Titres et descriptions optimisés pour : *dentiste Vienne, urgence dentaire Vienne,
   carie, cabinet dentaire, implant dentaire Vienne, parodontie Vienne, pédodontie Vienne,
   dentiste enfant Vienne*.
