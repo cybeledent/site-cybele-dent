@@ -30,7 +30,7 @@ Double-cliquez simplement sur **`index.html`** : il s'ouvre dans votre navigateu
 
 ## ✏️ À personnaliser (important)
 
-Déjà renseignés : ✅ téléphone `04 22 97 97 65`, ✅ e-mail `cybeledent@gmail.com`, ✅ horaires (lun/mar/jeu/ven 8h30–18h, mer 9h–13h / 14h–19h),
+Déjà renseignés : ✅ téléphone `04 22 97 97 65`, ✅ e-mail `cybeledent@gmail.com`, ✅ horaires (lun/mar/jeu 8h30–13h / 14h–18h, mer 9h–13h / 14h–19h, ven 8h30–13h / 14h–15h),
 ✅ noms des praticiennes (Dr Filipputti, Dr Agosto).
 
 Restent **provisoires** à remplacer (« Rechercher / Remplacer » dans tous les `.html`) :
