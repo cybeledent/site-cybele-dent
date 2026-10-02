@@ -7,7 +7,10 @@ Site vitrine du cabinet dentaire **Cybèle Dent**, 8 rue Calixte II, 38200 Vienn
 | Fichier | Rôle |
 |---------|------|
 | `index.html` | Page d'accueil (fond cathédrale + logo animé) |
-| `equipe.html` | Présentation de l'équipe |
+| `equipe.html` | Présentation de l'équipe (cartes cliquables vers les pages praticiennes) |
+| `dr-celine-filipputti-dentiste-vienne.html` | Page du Dr Céline Filipputti |
+| `dr-laura-agosto-dentiste-vienne.html` | Page du Dr Laura Agosto |
+| `clotilde-peaut-pedodontie-vienne.html` | Page de Clotilde Péaut (soins des enfants) |
 | `salles.html` | Les salles du cabinet |
 | `actes.html` | Les soins réalisés (page « Nos soins » : une carte par soin, qui mène à sa page détaillée) |
 | `prevention-dentaire-vienne.html` | Page détaillée : prévention dentaire |
