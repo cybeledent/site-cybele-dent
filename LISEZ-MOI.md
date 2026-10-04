@@ -25,6 +25,9 @@ Site vitrine du cabinet dentaire **Cybèle Dent**, 8 rue Calixte II, 38200 Vienn
 | `gouttiere-bruxisme-apnee-sommeil-vienne.html` | Page détaillée : gouttière de bruxisme et orthèse d'apnée du sommeil |
 | `tarifs-remboursement-dentiste-vienne.html` | Tarifs et remboursements (conventionnement, carte Vitale, tiers payant, 100 % Santé, devis) |
 | `en/index.html` | Page de présentation en anglais (visiteurs étrangers), liée à l'accueil |
+| `mentions-legales.html`, `politique-confidentialite.html` | Pages légales (éditeur SELARL Docteur Filipputti, hébergeur Hostinger, RGPD), liées en pied de page |
+| `404.html` | Page d'erreur personnalisée (déclarée dans `.htaccess`) |
+| `assets/fonts/` | Polices Inter et Poppins hébergées sur le site (plus d'appel aux serveurs de Google) |
 | `contact.html` | Coordonnées, horaires et plan |
 | `css/style.css` | Mise en forme |
 | `js/main.js` | Menu, animations |
@@ -75,6 +78,7 @@ Restent **provisoires** à remplacer (« Rechercher / Remplacer » dans tous les
   clair pour les assistants IA. Pensez à mettre `llms.txt` à jour quand les horaires, l'équipe ou
   les soins changent. Inscriptions à faire une fois : Bing Webmaster Tools (import depuis Google
   Search Console), Bing Places et Apple Business Connect.
+- **Auteur et date** : chaque page de soin affiche « Rédigé et relu par le Dr Céline Filipputti · Dernière mise à jour : … » (signal de confiance pour Google et les assistants IA). La date est définie dans les générateurs du site (`DATE_MAJ`) : mettez-la à jour quand vous relisez réellement les pages.
 - Titres et descriptions optimisés pour : *dentiste Vienne, urgence dentaire Vienne,
   carie, cabinet dentaire, implant dentaire Vienne, parodontie Vienne, pédodontie Vienne,
   dentiste enfant Vienne*.
@@ -105,5 +109,4 @@ Restent **provisoires** à remplacer (« Rechercher / Remplacer » dans tous les
 
 ## 🌐 Mettre le site en ligne
 
-Hébergement gratuit et simple : **Netlify** ou **GitHub Pages**.
-Sur Netlify, il suffit de glisser-déposer le dossier complet — le site est en ligne en quelques secondes.
+Le site est hébergé chez **Hostinger** (serveur Apache : le fichier `.htaccess` est bien pris en compte) et se met à jour automatiquement à chaque fusion dans la branche `main` du dépôt GitHub.

@@ -29,3 +29,6 @@
     Header set Cache-Control "no-cache, max-age=0, must-revalidate"
   </FilesMatch>
 </IfModule>
+
+# Page d'erreur personnalisée
+ErrorDocument 404 /404.html
