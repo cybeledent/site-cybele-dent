@@ -70,6 +70,11 @@ Restent **provisoires** à remplacer (« Rechercher / Remplacer » dans tous les
 - Photos optimisées : la photo de la cathédrale (fond des pages) a été compressée de 7,6 Mo à
   moins de 1 Mo pour accélérer le chargement, critère de classement Google. Si vous remplacez une
   photo, visez moins de 500 Ko (format JPEG, 1600 à 1800 px de large).
+- **Assistants IA (ChatGPT, Perplexity, Claude…)** : `robots.txt` autorise tous les robots sur les
+  pages publiques (et exclut les applications internes), et `llms.txt` résume le site en texte
+  clair pour les assistants IA. Pensez à mettre `llms.txt` à jour quand les horaires, l'équipe ou
+  les soins changent. Inscriptions à faire une fois : Bing Webmaster Tools (import depuis Google
+  Search Console), Bing Places et Apple Business Connect.
 - Titres et descriptions optimisés pour : *dentiste Vienne, urgence dentaire Vienne,
   carie, cabinet dentaire, implant dentaire Vienne, parodontie Vienne, pédodontie Vienne,
   dentiste enfant Vienne*.

@@ -1,4 +1,10 @@
+# Cybèle Dent — instructions aux robots d'indexation
+# Tous les moteurs de recherche et assistants IA (Google, Bing/ChatGPT, Perplexity,
+# Claude, Apple…) sont les bienvenus sur les pages publiques du site.
 User-agent: *
 Allow: /
+# Applications internes du cabinet : pas d'indexation
+Disallow: /cybelestock/
+Disallow: /gestion-equipements/
 
 Sitemap: https://www.cybele-dent.fr/sitemap.xml
