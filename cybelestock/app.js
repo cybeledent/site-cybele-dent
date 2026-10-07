@@ -2052,7 +2052,6 @@
             <div class="as-cat">${Math.max(0, l.qty - l.recu)} attendu${l.qty - l.recu > 1 ? "s" : ""}${l.ref ? " · réf " + esc(l.ref) : ""}${l.prix ? " · " + fmtEur(l.prix) : ""}
             ${p ? " · produit du stock : " + esc(p.name) : ' · <span class="cmd-unlinked">nouveau produit à créer</span>'}</div></button>`;
         }).join("") : '<div class="as-cat" style="padding:12px">Toutes les lignes de cette commande sont déjà reçues.</div>'}
-      </div>
       </div>`,
       `<button class="btn" data-cancel style="justify-content:center">Annuler</button>
        <button class="btn" data-all style="justify-content:center" title="Choisir dans tout le stock">Autre produit</button>
