@@ -1,5 +1,6 @@
 /* =========================================================
    CybèleGestion — Module Personnel (styles)
+   Planning, suivi privé, résumé comptable, demandes, membres.
    Réutilise les variables et composants de app.css
    ========================================================= */
 
@@ -113,35 +114,96 @@
 .pl-formation { background: #f1e9ff; }
 .pl-formation .pl-type { color: #7b3fe4; }
 
-/* =========================================================
-   BADGEUSE
-   ========================================================= */
-.badge-kiosk { max-width: 760px; margin: 0 auto; }
-.badge-clock { font-family: var(--font-head); font-size: 3.4rem; font-weight: 700; text-align: center; color: var(--navy); letter-spacing: .04em; }
-.badge-date { text-align: center; color: var(--muted); margin-bottom: 16px; text-transform: capitalize; }
-.badge-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 12px; }
-.badge-card {
-  background: #fff; border: 1px solid var(--line); border-radius: var(--radius); padding: 18px 12px;
-  box-shadow: var(--shadow); display: flex; flex-direction: column; align-items: center; gap: 8px;
-  text-align: center; transition: all .15s ease;
+.pl-conge-ss { background: #eeeaff; }
+.pl-conge-ss .pl-type { color: #5b4bb5; }
+
+/* Raccourcis employeur (tableau de bord) */
+.p-shortcuts { display: flex; gap: 10px; flex-wrap: wrap; }
+.p-stats.p-stats-5 { grid-template-columns: repeat(5, 1fr); }
+
+/* Bandeau "visible uniquement par vous" */
+.sv-private {
+  background: #fdf0eb; border: 1px dashed #f0c4b6; color: var(--coral-dark);
+  border-radius: 10px; padding: 9px 14px; font-size: .85rem; margin-bottom: 14px;
 }
-.badge-card:hover { box-shadow: var(--shadow-hover); transform: translateY(-2px); border-color: var(--coral); }
-.badge-card.in { background: #eafaf2; border-color: #b8e6cf; }
-.badge-name { font-weight: 600; line-height: 1.2; }
-.badge-state { font-size: .78rem; color: var(--muted); }
-.badge-elapsed { color: var(--ok); font-weight: 600; }
 
 /* =========================================================
-   TEMPS DE TRAVAIL (table)
+   SUIVI PRIVÉ (grille mensuelle)
    ========================================================= */
-.t-table-wrap { overflow-x: auto; border: 1px solid var(--line); border-radius: var(--radius); box-shadow: var(--shadow); }
-.t-table { width: 100%; border-collapse: collapse; background: #fff; min-width: 560px; }
-.t-table th, .t-table td { padding: 12px 14px; text-align: center; border-bottom: 1px solid var(--line); font-size: .9rem; }
-.t-table th { background: var(--bg); font-family: var(--font-head); font-weight: 600; color: var(--muted); font-size: .8rem; text-transform: uppercase; letter-spacing: .03em; }
-.t-table tbody tr:last-child td { border-bottom: none; }
-.t-table .t-name { text-align: left; display: flex; align-items: center; gap: 8px; font-weight: 600; }
-.t-pos { color: var(--ok); }
-.t-neg { color: var(--danger); }
+.sv-grid-wrap { overflow-x: auto; border: 1px solid var(--line); border-radius: var(--radius); background: #fff; box-shadow: var(--shadow); }
+.sv-grid { min-width: calc(170px + var(--sv-days, 22) * 46px + 150px); }
+.sv-row { display: grid; grid-template-columns: 170px repeat(var(--sv-days, 22), minmax(44px, 1fr)) 150px; border-bottom: 1px solid var(--line); }
+.sv-row:last-child { border-bottom: none; }
+.sv-head { background: var(--bg); position: sticky; top: 0; z-index: 1; }
+.sv-name { display: flex; align-items: center; gap: 8px; padding: 8px 10px; border-right: 1px solid var(--line); min-width: 0; position: sticky; left: 0; background: #fff; z-index: 1; }
+.sv-head .sv-name { background: var(--bg); font-weight: 600; font-size: .82rem; }
+.sv-total { padding: 8px 10px; font-size: .74rem; display: flex; flex-direction: column; justify-content: center; gap: 2px; border-left: 1px solid var(--line); }
+.sv-head .sv-total { font-weight: 600; font-size: .82rem; }
+.sv-tot-abs { color: var(--warn); font-weight: 600; }
+.sv-tot-ret { color: var(--danger); font-weight: 600; }
+.sv-tot-sup { color: var(--ok); font-weight: 600; }
+.sv-cell { border-right: 1px solid var(--line); min-height: 50px; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 2px; padding: 4px 2px; cursor: pointer; font-size: .7rem; }
+.sv-cell:hover { background: var(--coral-light); }
+.sv-dayhead { cursor: default; font-weight: 600; font-size: .8rem; }
+.sv-dayhead:hover { background: transparent; }
+.sv-dow { color: var(--muted); font-weight: 400; font-size: .64rem; }
+.sv-dayhead.today { color: var(--coral); }
+.sv-dayhead.today .sv-dow { color: var(--coral); }
+.sv-dayhead.sv-ferie { background: #fdecea; color: #c0392b; }
+.sv-dayhead.sv-ferm { background: #eef0f4; color: #5a5f6e; }
+.sv-dayhead.sv-we { background: #f4f3f7; color: var(--muted); }
+.sv-cell.sv-col-ferie { background-image: linear-gradient(rgba(192,57,43,.06), rgba(192,57,43,.06)); }
+.sv-cell.sv-col-ferm { background-image: linear-gradient(rgba(90,95,110,.07), rgba(90,95,110,.07)); }
+.sv-cell.sv-col-we { background-image: linear-gradient(rgba(0,0,0,.03), rgba(0,0,0,.03)); }
+.sv-empty .sv-hint { opacity: .4; font-size: .85rem; }
+.sv-filled { background: #fffdf7; }
+.sv-mark { display: inline-block; border-radius: 6px; padding: 1px 4px; font-weight: 600; line-height: 1.3; white-space: nowrap; }
+.sv-mark.sv-abs { background: var(--warn-bg); color: var(--warn); font-size: .8rem; }
+.sv-mark.sv-ret { background: var(--danger-bg); color: var(--danger); }
+.sv-mark.sv-sup { background: var(--ok-bg); color: var(--ok); }
+.sv-mark.sv-note { background: var(--bg); color: var(--muted); }
+.pl-leg.sv-leg-ret { background: var(--danger-bg); color: var(--danger); }
+.pl-leg.sv-leg-sup { background: var(--ok-bg); color: var(--ok); }
+.pl-leg.sv-leg-abs { background: var(--warn-bg); color: var(--warn); }
+
+/* Formulaire de suivi (modale) */
+.sv-form-block { border: 1px solid var(--line); border-radius: var(--radius-sm); padding: 12px 14px 4px; margin-bottom: 12px; background: #fcfbfd; }
+.sv-form-title { font-weight: 600; font-size: .9rem; margin-bottom: 8px; }
+
+/* =========================================================
+   RÉSUMÉ COMPTABLE
+   ========================================================= */
+.rs-filters { display: flex; gap: 12px; flex-wrap: wrap; align-items: flex-end; margin-bottom: 14px; }
+.rs-filters .field { flex: 1; min-width: 160px; margin-bottom: 0; }
+.rs-sheet { background: #fff; border: 1px solid var(--line); border-radius: var(--radius); box-shadow: var(--shadow); padding: 26px 30px; line-height: 1.6; }
+.rs-title { font-family: var(--font-head); font-weight: 600; font-size: 1.15rem; color: var(--navy); }
+.rs-sub { color: var(--muted); font-size: .88rem; margin-bottom: 18px; }
+.rs-bloc { padding: 12px 0; border-top: 1px solid var(--line); }
+.rs-nom { font-weight: 600; margin-bottom: 4px; }
+.rs-lines { margin: 0 0 4px 18px; padding: 0; }
+.rs-lines li { margin: 2px 0; }
+.rs-total { font-size: .88rem; color: var(--muted); font-style: italic; margin-left: 18px; }
+.rs-rien { color: var(--muted); margin-left: 18px; }
+
+/* =========================================================
+   CONGÉS PAYÉS (encadré) & BILAN ANNUEL
+   ========================================================= */
+.cp-card { display: grid; grid-template-columns: repeat(4, 1fr); gap: 12px; }
+.cp-stat { background: #fff; border: 1px solid var(--line); border-radius: var(--radius); padding: 14px 12px; box-shadow: var(--shadow); text-align: center; }
+.cp-n { font-family: var(--font-head); font-weight: 700; font-size: 1.6rem; line-height: 1.1; color: var(--navy); }
+.cp-l { color: var(--muted); font-size: .8rem; margin-top: 5px; line-height: 1.3; }
+.cp-l span { font-size: .72rem; }
+.cp-stat.cp-solde { background: var(--ok-bg); border-color: #b8e6cf; }
+.cp-stat.cp-solde .cp-n { color: var(--ok); }
+.bl-equipe { display: grid; grid-template-columns: repeat(3, 1fr); gap: 12px; margin-bottom: 18px; }
+.bl-equipe .cp-stat { background: var(--bg); box-shadow: none; }
+.bl-grid { display: grid; grid-template-columns: 1.4fr 1fr 1fr 1.6fr; gap: 10px 16px; margin-left: 2px; }
+.bl-item { min-width: 0; }
+.bl-k { font-size: .72rem; text-transform: uppercase; letter-spacing: .06em; color: var(--muted); font-weight: 600; margin-bottom: 3px; }
+.bl-v { font-size: .92rem; }
+.bl-types { list-style: none; margin: 5px 0 0; padding: 0; font-size: .85rem; }
+.bl-types li { margin: 2px 0; }
+.rs-nom .p-avatar { vertical-align: middle; margin-right: 4px; }
 
 .plain-card.off { opacity: .6; }
 
@@ -171,9 +233,12 @@
 @media print {
   @page { size: A4 landscape; margin: 10mm; }
   body { background: #fff !important; }
-  /* on masque tout sauf le planning */
-  .app-header, .session-bar, .p-subnav, .pl-toolbar, .pl-tip, .toast,
+  /* on masque tout sauf le planning / le résumé */
+  .app-header, .session-bar, .p-subnav, .pl-toolbar, .pl-tip, .toast, .sv-private, .rs-filters,
   #modal-root, [data-module-panel="equipements"] { display: none !important; }
+  .rs-sheet { box-shadow: none !important; border: none !important; padding: 0 !important; }
+  .cp-stat { box-shadow: none !important; }
+  .bl-bloc { break-inside: avoid; }
   .print-title { display: block !important; text-align: center; font-family: "Poppins", sans-serif; font-weight: 600; font-size: 1.15rem; margin-bottom: 12px; color: #000; }
   .app-main { padding: 0 !important; max-width: none !important; }
   .pl-grid { box-shadow: none !important; border: 1px solid #999 !important; overflow: visible !important; }
@@ -193,5 +258,12 @@
   .pl-grid { overflow-x: auto; }
   .pl-grid.d7 .pl-row { grid-template-columns: 140px repeat(7, minmax(74px, 1fr)); min-width: 660px; }
   .pl-grid.d5 .pl-row { grid-template-columns: 130px repeat(5, minmax(84px, 1fr)); min-width: 540px; }
-  .badge-clock { font-size: 2.6rem; }
+  .p-stats.p-stats-5 { grid-template-columns: repeat(2, 1fr); }
+  .sv-row { grid-template-columns: 120px repeat(var(--sv-days, 22), 44px) 130px; }
+  .sv-grid { min-width: calc(120px + var(--sv-days, 22) * 44px + 130px); }
+  .sv-name .pl-mr { display: none; }
+  .rs-sheet { padding: 18px 16px; }
+  .cp-card { grid-template-columns: repeat(2, 1fr); }
+  .bl-equipe { grid-template-columns: 1fr; }
+  .bl-grid { grid-template-columns: 1fr; }
 }

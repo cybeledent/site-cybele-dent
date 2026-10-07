@@ -1,25 +1,35 @@
 /* =========================================================
    CybèleGestion — Module Personnel / RH
-   Planning, badgeuse, congés, heures, export paie.
-   Données locales (localStorage) — clé cybele-personnel-v1.
+   Planning partagé, suivi privé (employeur), demandes de congés,
+   résumé pour le comptable.
+   Données : localStorage + Firestore (clé cybele-personnel-v1,
+   suivi privé dans cybele-personnel-prive-v1).
    ========================================================= */
 (function () {
   "use strict";
 
   const STORE_KEY = "cybele-personnel-v1";
+  const PRIVE_KEY = "cybele-personnel-prive-v1";
 
   const ROLES = ["Praticien", "Assistant(e)", "Secrétaire", "Autre"];
-  const ABSENCE_TYPES = ["Congé payé", "RTT", "Absence", "Maladie", "Formation"];
+  // Types proposés dans les demandes (visibles de tous)
+  const ABSENCE_TYPES = ["Congé payé", "RTT", "Congé sans solde", "Absence", "Maladie", "Formation"];
+  // Types d'absence du suivi privé (employeur) — ce qui figurera dans le résumé comptable
+  const SUIVI_ABSENCES = ["Congé payé", "Congé sans solde", "Absence injustifiée", "Maladie (arrêt)", "RTT", "Formation", "Événement familial", "Autre"];
+  const DUREES = { journee: "journée", matin: "matin", apresmidi: "après-midi" };
+
   const PLANNING_TYPES = {
-    present:   { label: "Présent",   cls: "present",  ico: "🟢" },
-    repos:     { label: "Repos",     cls: "repos",    ico: "⚪" },
-    conge:     { label: "Congé",     cls: "conge",    ico: "🌴" },
-    absence:   { label: "Absence",   cls: "absence",  ico: "🟠" },
-    maladie:   { label: "Maladie",   cls: "maladie",  ico: "🔴" },
-    formation: { label: "Formation", cls: "formation",ico: "🎓" },
+    present:   { label: "Présent",     cls: "present",   ico: "🟢" },
+    repos:     { label: "Repos",       cls: "repos",     ico: "⚪" },
+    conge:     { label: "Congé",       cls: "conge",     ico: "🌴" },
+    conge_ss:  { label: "Sans solde",  cls: "conge-ss",  ico: "🌙" },
+    absence:   { label: "Absence",     cls: "absence",   ico: "🟠" },
+    maladie:   { label: "Maladie",     cls: "maladie",   ico: "🔴" },
+    formation: { label: "Formation",   cls: "formation", ico: "🎓" },
   };
   const COLORS = ["#e07a5f", "#3a6ea5", "#16a36a", "#9b5de5", "#c98a14", "#d6453f", "#0ca5a5"];
   const JOURS = ["Lun", "Mar", "Mer", "Jeu", "Ven", "Sam", "Dim"];
+  const JOURS_1 = ["L", "M", "M", "J", "V", "S", "D"];
   const MOIS = ["janvier", "février", "mars", "avril", "mai", "juin", "juillet", "août", "septembre", "octobre", "novembre", "décembre"];
   const MOIS_C = ["janv.", "févr.", "mars", "avr.", "mai", "juin", "juil.", "août", "sept.", "oct.", "nov.", "déc."];
 
@@ -52,26 +62,31 @@
   /* =========================================================
      ÉTAT
      ========================================================= */
-  let state = null;
+  let state = null;   // données partagées (membres, planning, demandes…)
+  let prive = null;   // suivi privé de l'employeur (retards, heures sup, absences)
   let sessionUser = null; // membre connecté pour cette session
-  let view = { tab: "dashboard", weekStart: mondayOf(new Date()), monthRef: ymOf(new Date()) };
-  let clockTimer = null;
+  let view = { tab: "dashboard", weekStart: mondayOf(new Date()), monthRef: ymOf(new Date()), resumeDu: "", resumeAu: "", resumeMembre: "", bilanOffset: 0 };
 
   function loadLocal() {
     try { const raw = localStorage.getItem(STORE_KEY); if (raw) return migrate(JSON.parse(raw)); } catch (e) {}
     return null;
   }
   function migrate(s) {
-    s.membres = s.membres || []; s.planning = s.planning || []; s.pointages = s.pointages || [];
+    s.membres = s.membres || []; s.planning = s.planning || [];
     s.demandes = s.demandes || []; s.reglages = s.reglages || defaultReglages();
     s.fermetures = s.fermetures || [];
+    delete s.pointages; // ancienne badgeuse — plus utilisée
     // Chaque membre est salarié·e par défaut (sauf praticien) → congés décomptés lors des fermetures
     s.membres.forEach(m => {
       if (m.salarie === undefined) m.salarie = m.role !== "Praticien";
       if (m.login === undefined) m.login = ""; // identifiant du compte de connexion associé
+      if (m.dateEntree === undefined) m.dateEntree = "";   // date d'entrée (acquisition des congés au prorata)
+      if (m.reportConges === undefined) m.reportConges = 0; // jours reportés de la période précédente
     });
     // Complète les réglages manquants (rétro-compat)
     if (s.reglages.afficherWeekend === undefined) s.reglages.afficherWeekend = false;
+    if (!s.reglages.modeConges) s.reglages.modeConges = "mensuel";       // "mensuel" (1/12 par mois) ou "fixe"
+    if (!s.reglages.periodeRefMois) s.reglages.periodeRefMois = 1;       // mois de début de la période de référence (1 = janvier, 6 = juin)
     if (!Array.isArray(s.reglages.creneauxDefaut) || !s.reglages.creneauxDefaut.length)
       s.reglages.creneauxDefaut = [{ debut: "09:00", fin: "13:00" }, { debut: "14:00", fin: "18:00" }];
     // Si aucun manager défini, auto-détecte par le nom "Filipputti"
@@ -89,14 +104,35 @@
   }
   function defaultReglages() { return { heuresSemaineDefaut: 35, congesAnnuelDefaut: 25, pauseDejeunerMin: 60, afficherWeekend: false, creneauxDefaut: [{ debut: "09:00", fin: "13:00" }, { debut: "14:00", fin: "18:00" }] }; }
   function save() {
-    // Sauvegarde locale
     try { localStorage.setItem(STORE_KEY, JSON.stringify(state)); }
     catch (e) { toast("⚠ Mémoire pleine."); }
-    // Synchronisation Firestore
-    if (window.CybeleDB) {
-      window.CybeleDB.save("personnel", state).catch(() => {});
-    }
+    if (window.CybeleDB) window.CybeleDB.save("personnel", state).catch(() => {});
   }
+
+  /* ---- Suivi privé ---- */
+  function migratePrive(p) {
+    p = p || {};
+    p.suivi = Array.isArray(p.suivi) ? p.suivi : [];
+    p.suivi.forEach(s => {
+      s.retardMin = Number(s.retardMin) || 0;
+      s.supMin = Number(s.supMin) || 0;
+      s.absence = s.absence || "";
+      s.duree = s.duree || "journee";
+      s.note = s.note || "";
+    });
+    return p;
+  }
+  function loadPriveLocal() {
+    try { const raw = localStorage.getItem(PRIVE_KEY); if (raw) return migratePrive(JSON.parse(raw)); } catch (e) {}
+    return null;
+  }
+  function savePrive() {
+    try { localStorage.setItem(PRIVE_KEY, JSON.stringify(prive)); } catch (e) {}
+    if (window.CybeleDB) window.CybeleDB.save("personnel-prive", prive).catch(() => {});
+  }
+  function suiviOf(membreId, date) { return prive.suivi.find(s => s.membreId === membreId && s.date === date); }
+  function suiviVide(s) { return !s.retardMin && !s.supMin && !s.absence && !s.note; }
+
   function uid() { return Date.now().toString(36) + Math.random().toString(36).slice(2, 7); }
 
   /* =========================================================
@@ -121,35 +157,26 @@
     const planning = [];
     membres.forEach(mb => {
       for (let i = 0; i < 5; i++) {
-        const present = !(mb.id === m4 && i === 2); // Julie en formation mercredi
-        if (mb.id === m4 && i === 2) { planning.push({ id: uid(), membreId: mb.id, date: dd(i), type: "formation", debut: "", fin: "", note: "Formation implanto" }); continue; }
-        planning.push({ id: uid(), membreId: mb.id, date: dd(i), type: "present", debut: mb.id === m5 ? "08:30" : "09:00", fin: mb.id === m5 ? "16:30" : "18:00", note: "" });
+        if (mb.id === m4 && i === 2) { planning.push({ id: uid(), membreId: mb.id, date: dd(i), type: "formation", debut: "", fin: "", creneaux: [], note: "Formation implanto" }); continue; }
+        const c = mb.id === m5 ? [{ debut: "08:30", fin: "16:30" }] : [{ debut: "09:00", fin: "13:00" }, { debut: "14:00", fin: "18:00" }];
+        planning.push({ id: uid(), membreId: mb.id, date: dd(i), type: "present", debut: "", fin: "", creneaux: c, note: "" });
       }
     });
-
-    // Quelques pointages réels d'aujourd'hui (un en cours, un terminé, un oublié)
-    const todayISO = iso(new Date());
-    const pointages = [
-      { id: uid(), membreId: m1, date: todayISO, arrivee: atToday(8, 58), depart: "", pauseMin: 0 },        // en cours
-      { id: uid(), membreId: m3, date: todayISO, arrivee: atToday(9, 2), depart: atToday(13, 5), pauseMin: 0 }, // matin fait
-    ];
 
     const demandes = [
       { id: uid(), membreId: m3, type: "Congé payé", dateDebut: dd(12), dateFin: dd(16), motif: "Vacances", statut: "en_attente", createdAt: new Date().toISOString() },
       { id: uid(), membreId: m5, type: "RTT", dateDebut: dd(8), dateFin: dd(8), motif: "", statut: "en_attente", createdAt: new Date().toISOString() },
-      { id: uid(), membreId: m4, type: "Congé payé", dateDebut: dd(-20), dateFin: dd(-16), motif: "", statut: "valide", createdAt: new Date().toISOString() },
     ];
 
     const yr = new Date().getFullYear();
     const fermetures = [{ id: uid(), nom: "Fermeture estivale", du: yr + "-08-03", au: yr + "-08-14" }];
 
-    return { membres, planning, pointages, demandes, fermetures, reglages: defaultReglages() };
+    return { membres, planning, demandes, fermetures, reglages: defaultReglages() };
   }
 
   /* =========================================================
      UTILITAIRES DATE / HEURE
      ========================================================= */
-  // Dates au format calendrier LOCAL (évite le décalage UTC qui cassait isoAdd)
   function pad2(n) { return String(n).padStart(2, "0"); }
   function iso(d) { return d.getFullYear() + "-" + pad2(d.getMonth() + 1) + "-" + pad2(d.getDate()); }
   function ymOf(d) { return d.getFullYear() + "-" + pad2(d.getMonth() + 1); }
@@ -160,7 +187,10 @@
     return iso(x);
   }
   function isoAdd(isoStr, days) { const d = new Date(isoStr + "T00:00:00"); d.setDate(d.getDate() + days); return iso(d); }
-  function atToday(h, m) { const d = new Date(); d.setHours(h, m, 0, 0); return d.toISOString(); }
+  function weekdayOf(isoStr) { return (new Date(isoStr + "T00:00:00").getDay() + 6) % 7; } // 0 = lundi … 6 = dimanche
+  function isWeekend(isoStr) { return weekdayOf(isoStr) >= 5; }
+  function monthBounds(ym) { const [y, mo] = ym.split("-").map(Number); return { from: ym + "-01", to: iso(new Date(y, mo, 0)) }; }
+  function shiftMonth(ym, delta) { const [y, m] = ym.split("-").map(Number); const d = new Date(y, m - 1 + delta, 1); return ymOf(d); }
   function fmtDate(isoStr) {
     if (!isoStr) return "—";
     const d = new Date(isoStr + "T00:00:00");
@@ -168,15 +198,47 @@
     return d.getDate() + " " + MOIS_C[d.getMonth()] + " " + d.getFullYear();
   }
   function fmtDateShort(isoStr) { const d = new Date(isoStr + "T00:00:00"); return d.getDate() + " " + MOIS_C[d.getMonth()]; }
+  function fmtLong(isoStr) { const d = new Date(isoStr + "T00:00:00"); return (d.getDate() === 1 ? "1er" : d.getDate()) + " " + MOIS[d.getMonth()] + " " + d.getFullYear(); }
+  function fmtPeriode(a, b) { // "du 6 au 10 octobre 2026" / "du 29 septembre au 3 octobre 2026"
+    if (a === b) return "le " + fmtLong(a);
+    const da = new Date(a + "T00:00:00"), db = new Date(b + "T00:00:00");
+    const ja = da.getDate() === 1 ? "1er" : da.getDate();
+    if (da.getMonth() === db.getMonth() && da.getFullYear() === db.getFullYear()) return "du " + ja + " au " + fmtLong(b);
+    if (da.getFullYear() === db.getFullYear()) return "du " + ja + " " + MOIS[da.getMonth()] + " au " + fmtLong(b);
+    return "du " + fmtLong(a) + " au " + fmtLong(b);
+  }
   function parseHM(s) { if (!s) return null; const [h, m] = s.split(":").map(Number); return h * 60 + (m || 0); }
   function fmtHM(min) { if (min == null) return "—"; const h = Math.floor(Math.abs(min) / 60), m = Math.round(Math.abs(min) % 60); return (min < 0 ? "-" : "") + h + "h" + (m ? String(m).padStart(2, "0") : ""); }
-  function fmtTime(isoDt) { if (!isoDt) return "—"; const d = new Date(isoDt); return String(d.getHours()).padStart(2, "0") + ":" + String(d.getMinutes()).padStart(2, "0"); }
+  // "1h30" / "1 h 30" / "1:30" / "45" / "45 min" / "0,5 h" → minutes (0 si vide, null si incompréhensible)
+  function parseDuree(s) {
+    s = String(s || "").trim().toLowerCase().replace(",", ".");
+    if (!s) return 0;
+    let m = s.match(/^(\d+(?:\.\d+)?)\s*h(?:\s*(\d{1,2}))?\s*(?:min)?$/);
+    if (m) return Math.round(parseFloat(m[1]) * 60 + (parseInt(m[2] || "0", 10)));
+    m = s.match(/^(\d{1,2}):(\d{2})$/);
+    if (m) return parseInt(m[1], 10) * 60 + parseInt(m[2], 10);
+    m = s.match(/^(\d+)\s*(?:min|mn|minutes?)?$/);
+    if (m) return parseInt(m[1], 10);
+    return null;
+  }
+  function fmtDuree(min) { // "20 min" / "1h30" / "2h"
+    min = Math.round(min || 0);
+    if (min < 60) return min + " min";
+    return fmtHM(min);
+  }
+  function fmtJours(n) { // 0.5 → "½ journée", 1 → "1 jour", 2.5 → "2,5 jours"
+    if (n === 0.5) return "½ journée";
+    const s = String(n).replace(".", ",");
+    return s + (n > 1 ? " jours" : " jour");
+  }
   function workdaysBetween(a, b) { // jours ouvrés Lun-Ven inclus
     let n = 0, d = new Date(a + "T00:00:00"), end = new Date(b + "T00:00:00");
     while (d <= end) { const wd = d.getDay(); if (wd !== 0 && wd !== 6) n++; d.setDate(d.getDate() + 1); }
     return n;
   }
   function esc(s) { return String(s == null ? "" : s).replace(/[&<>"']/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c])); }
+  // Minuscule initiale ("Congé payé" → "congé payé") sauf pour les sigles ("RTT")
+  function lc1(s) { s = String(s || ""); return /^[A-ZÀ-Ý][a-zà-ÿ]/.test(s) ? s.charAt(0).toLowerCase() + s.slice(1) : s; }
 
   /* ---- Jours fériés (France) + vacances scolaires Zone A ---- */
   function easterSunday(y) { // algorithme de Meeus/Jones/Butcher (grégorien)
@@ -208,22 +270,17 @@
   function vacancesNom(isoStr) { const v = VACANCES_ZONE_A.find(p => isoStr >= p.du && isoStr < p.au); return v ? v.nom : null; }
   // Fermeture du cabinet couvrant une date (bornes incluses)
   function fermetureFor(isoStr) { return (state.fermetures || []).find(f => isoStr >= f.du && isoStr <= f.au) || null; }
+  // Jour "ouvrable" pour le cabinet : ni week-end, ni férié
+  function isOuvre(isoStr) { return !isWeekend(isoStr) && !ferieNom(isoStr); }
 
   function membre(id) { return state.membres.find(m => m.id === id); }
   function membreNom(id) { const m = membre(id); return m ? m.prenom + " " + m.nom : "—"; }
   function initiales(m) { return (m.prenom[0] || "") + (m.nom[0] || ""); }
+  function isManager() { return !!(sessionUser && sessionUser.isManager); }
+  function membresActifs() { return state.membres.filter(m => m.actif); }
+  function membresTries() { return membresActifs().slice().sort((a, b) => (a.nom + a.prenom).localeCompare(b.nom + b.prenom, "fr")); }
 
-  /* ---- Calculs heures ---- */
-  function pointageMinutes(p) {
-    if (!p.arrivee || !p.depart) return 0;
-    return Math.max(0, (new Date(p.depart) - new Date(p.arrivee)) / 60000 - (p.pauseMin || 0));
-  }
-  function realMinutesIn(membreId, dFrom, dTo) {
-    return state.pointages.filter(p => p.membreId === membreId && p.date >= dFrom && p.date <= dTo && p.depart)
-      .reduce((s, p) => s + pointageMinutes(p), 0);
-  }
-  // Créneaux horaires d'une entrée de planning (supporte l'ancien format debut/fin
-  // et le nouveau format à créneaux multiples creneaux:[{debut,fin}, ...])
+  /* ---- Calculs heures (planning) ---- */
   function creneauxOf(e) {
     if (!e) return [];
     if (Array.isArray(e.creneaux) && e.creneaux.length) return e.creneaux.filter(c => c && c.debut && c.fin);
@@ -238,32 +295,48 @@
     return state.planning.filter(p => p.membreId === membreId && p.type === "present" && p.date >= dFrom && p.date <= dTo && !ferieNom(p.date) && !fermetureFor(p.date))
       .reduce((s, p) => s + entryMinutes(p), 0);
   }
-  function openPointage(membreId) {
-    return state.pointages.find(p => p.membreId === membreId && p.arrivee && !p.depart);
+  /* ---- Congés payés : période de référence, acquisition, solde ---- */
+  function addMonths(isoStr, n) { const d = new Date(isoStr + "T00:00:00"); d.setMonth(d.getMonth() + n); return iso(d); }
+  function round1(n) { return Math.round(n * 10) / 10; }
+  function fmtNum(n) { return String(round1(n)).replace(".", ","); }
+  // Période de référence des congés contenant `dateIso` (décalée de `offset` périodes)
+  function periodeRef(dateIso, offset) {
+    const mo = Number(state.reglages.periodeRefMois) || 1;
+    const d = new Date(dateIso + "T00:00:00");
+    let y = d.getFullYear(); if ((d.getMonth() + 1) < mo) y--;
+    y += (offset || 0);
+    const from = y + "-" + pad2(mo) + "-01";
+    const to = isoAdd(addMonths(from, 12), -1);
+    const label = mo === 1 ? String(y) : (y + "-" + (y + 1));
+    const detail = mo === 1 ? "année civile " + y : "du 1er " + MOIS[mo - 1] + " " + y + " au " + fmtLong(to);
+    return { from, to, label, detail, annee: y };
   }
-  function congesPris(membreId) { // jours ouvrés de congés validés sur l'année courante
-    const year = new Date().getFullYear();
-    const demandes = state.demandes.filter(d => d.membreId === membreId && d.statut === "valide" && /Cong|RTT/.test(d.type) && d.dateDebut.startsWith(String(year)))
-      .reduce((s, d) => s + workdaysBetween(d.dateDebut, d.dateFin), 0);
-    return demandes + fermetureCongeDays(membreId, year);
+  // Congés payés pris (jours ouvrés, demi-journées comprises) sur une période :
+  // suivi privé + congés validés du planning + fermetures du cabinet, sans doublon
+  function congesPrisPeriode(m, from, to) {
+    return absencesPour(m, from, to).runs.filter(r => /^Congé payé/.test(r.label)).reduce((s, r) => s + r.jours, 0);
   }
-  // Jours ouvrés (hors fériés) de fermeture décomptés en congés pour un·e salarié·e
-  function fermetureCongeDays(membreId, year) {
-    const m = membre(membreId);
-    if (!m || !m.salarie) return 0;
-    const y = String(year || new Date().getFullYear());
-    let total = 0;
-    (state.fermetures || []).forEach(f => {
-      let cur = f.du, guard = 0;
-      while (cur <= f.au && guard++ < 800) {
-        const wd = new Date(cur + "T00:00:00").getDay();
-        if (wd !== 0 && wd !== 6 && cur.startsWith(y) && !ferieNom(cur)) total++;
-        cur = isoAdd(cur, 1);
-      }
-    });
-    return total;
+  // Acquisition : 1/12 du droit annuel par mois complet de présence depuis le début
+  // de la période (ou la date d'entrée), jusqu'à `asOf` ; mode "fixe" = droit annuel entier
+  function acquisConges(m, per, asOf) {
+    const annuel = Number(m.congesAcquis) || 0, report = Number(m.reportConges) || 0;
+    if (state.reglages.modeConges === "fixe") return { mode: "fixe", acquis: annuel, fin: annuel, report, total: annuel + report, mois: 12, moisFin: 12, depuis: per.from };
+    const start = (m.dateEntree && m.dateEntree > per.from) ? m.dateEntree : per.from;
+    const limit = asOf < per.to ? asOf : per.to;
+    let mois = 0, moisFin = 0;
+    while (mois < 12 && addMonths(start, mois + 1) <= isoAdd(limit, 1)) mois++;
+    while (moisFin < 12 && addMonths(start, moisFin + 1) <= isoAdd(per.to, 1)) moisFin++;
+    const taux = annuel / 12;
+    return { mode: "mensuel", acquis: round1(mois * taux), fin: round1(moisFin * taux), report, total: round1(mois * taux + report), mois, moisFin, depuis: start, taux };
   }
-  function soldeConges(m) { return (m.congesAcquis || 0) - congesPris(m.id); }
+  // Situation des congés payés d'une personne sur la période de référence courante
+  function situationConges(m, offset) {
+    const today = iso(new Date());
+    const per = periodeRef(today, offset);
+    const acq = acquisConges(m, per, today);
+    const pris = congesPrisPeriode(m, per.from, per.to);
+    return { per, acq, pris, solde: round1(acq.total - pris), soldeFin: round1(acq.fin + acq.report - pris) };
+  }
 
   /* =========================================================
      PETITS COMPOSANTS UI (modale, toast)
@@ -290,9 +363,8 @@
     return ov;
   }
   function val(ov, n) { const el = ov.querySelector(`[name="${n}"]`); return el ? el.value.trim() : ""; }
-  function fText(n, l, v, o) { o = o || {}; return `<div class="field"><label>${esc(l)}</label><input type="${o.type || "text"}" name="${n}" value="${esc(v || "")}" placeholder="${esc(o.ph || "")}"></div>`; }
+  function fText(n, l, v, o) { o = o || {}; return `<div class="field"><label>${esc(l)}</label><input type="${o.type || "text"}" name="${n}" value="${esc(v || "")}" placeholder="${esc(o.ph || "")}"${o.attrs || ""}></div>`; }
   function fSelect(n, l, v, opts) { return `<div class="field"><label>${esc(l)}</label><select name="${n}">${opts.map(o => { const val = typeof o === "string" ? o : o.v, lab = typeof o === "string" ? o : o.l; return `<option value="${esc(val)}" ${val === v ? "selected" : ""}>${esc(lab)}</option>`; }).join("")}</select></div>`; }
-  function fArea(n, l, v) { return `<div class="field"><label>${esc(l)}</label><textarea name="${n}">${esc(v || "")}</textarea></div>`; }
 
   let toastTimer;
   function toast(msg) {
@@ -322,7 +394,8 @@
     if (!state) return;
     if (!sessionUser) autoSelectSession();
     if (!sessionUser) { renderLogin(); return; }
-    if (clockTimer) { clearInterval(clockTimer); clockTimer = null; }
+    // Les onglets privés ne sont accessibles qu'à l'employeur
+    if ((view.tab === "suivi" || view.tab === "resume" || view.tab === "bilan") && !isManager()) view.tab = "dashboard";
     root.innerHTML = `
       <div class="session-bar">
         <span>👤 ${esc(sessionUser.prenom)} ${esc(sessionUser.nom)}${sessionUser.isManager ? " · <strong>Employeur</strong>" : ""}</span>
@@ -331,8 +404,9 @@
       <div class="p-subnav">
         ${subTab("dashboard", "📊 Tableau de bord")}
         ${subTab("planning", "🗓 Planning")}
-        ${subTab("badgeuse", "⏱ Badgeuse")}
-        ${subTab("temps", "📈 Temps de travail")}
+        ${isManager() ? subTab("suivi", "🔒 Suivi privé") : ""}
+        ${isManager() ? subTab("resume", "🧾 Résumé comptable") : ""}
+        ${isManager() ? subTab("bilan", "📅 Bilan annuel") : ""}
         ${subTab("demandes", "✅ Demandes")}
         ${subTab("membres", "👤 Membres")}
       </div>
@@ -342,7 +416,6 @@
   }
 
   function renderLogin() {
-    if (clockTimer) { clearInterval(clockTimer); clockTimer = null; }
     const membres = (state.membres || []).filter(m => m.actif !== false);
     root.innerHTML = `
       <div style="max-width:380px;margin:60px auto;padding:0 16px">
@@ -388,10 +461,12 @@
   }
   function renderTab() {
     const c = document.getElementById("p-content");
+    if (!c) return;
     if (view.tab === "dashboard") c.innerHTML = viewDashboard();
     else if (view.tab === "planning") c.innerHTML = viewPlanning();
-    else if (view.tab === "badgeuse") { c.innerHTML = viewBadgeuse(); startClock(); }
-    else if (view.tab === "temps") c.innerHTML = viewTemps();
+    else if (view.tab === "suivi") c.innerHTML = viewSuivi();
+    else if (view.tab === "resume") c.innerHTML = viewResume();
+    else if (view.tab === "bilan") c.innerHTML = viewBilan();
     else if (view.tab === "demandes") c.innerHTML = viewDemandes();
     else if (view.tab === "membres") c.innerHTML = viewMembres();
   }
@@ -407,73 +482,171 @@
   function viewDashboard() {
     const today = iso(new Date());
     const enAttente = state.demandes.filter(d => d.statut === "en_attente");
-    const presents = state.membres.filter(m => openPointage(m.id));
-    // pointages oubliés : présent prévu aujourd'hui mais aucun pointage commencé
-    const oublis = ferieNom(today) ? [] : state.membres.filter(m => {
-      const prevu = state.planning.some(p => p.membreId === m.id && p.date === today && p.type === "present");
-      const pointe = state.pointages.some(p => p.membreId === m.id && p.date === today);
-      const hour = new Date().getHours();
-      return prevu && !pointe && hour >= 10; // alerte après 10h
-    });
-    // dépassements de la semaine (réel > contrat)
-    const wkEnd = isoAdd(view.weekStart, 6);
-    const depass = state.membres.map(m => {
-      const real = realMinutesIn(m.id, mondayOf(new Date()), today);
-      return { m, real, contrat: (m.heuresSemaine || 0) * 60 };
-    }).filter(x => x.real > x.contrat && x.contrat > 0);
+    const ferie = ferieNom(today), ferm = fermetureFor(today);
+    // Absent·es aujourd'hui d'après le planning partagé
+    const absents = membresActifs().map(m => {
+      const e = state.planning.find(p => p.membreId === m.id && p.date === today);
+      return e && e.type !== "present" && e.type !== "repos" ? { m, e } : null;
+    }).filter(Boolean);
+    const presents = ferie || ferm ? [] : membresActifs().filter(m => state.planning.some(p => p.membreId === m.id && p.date === today && p.type === "present"));
 
     const stat = (n, label, cls) => `<div class="p-stat ${cls || ""}"><div class="p-stat-n">${n}</div><div class="p-stat-l">${label}</div></div>`;
+    const mgr = isManager();
+    let mgrStats = "";
+    if (mgr) {
+      const { from, to } = monthBounds(ymOf(new Date()));
+      const mois = prive.suivi.filter(s => s.date >= from && s.date <= to);
+      const retards = mois.filter(s => s.retardMin > 0).length;
+      const sup = mois.reduce((t, s) => t + (s.supMin || 0), 0);
+      mgrStats = stat(retards, "Retards ce mois", retards ? "warn" : "") + stat(fmtHM(sup), "Heures sup. ce mois", sup ? "ok" : "");
+    }
 
     return `
-      <div class="p-stats">
-        ${stat(state.membres.filter(m => m.actif).length, "Membres actifs")}
-        ${stat(presents.length, "Présents maintenant", "ok")}
+      <div class="p-stats ${mgr ? "p-stats-5" : ""}">
+        ${stat(membresActifs().length, "Membres actifs")}
+        ${stat(presents.length, "Prévu·es aujourd'hui", "ok")}
         ${stat(enAttente.length, "Demandes en attente", enAttente.length ? "warn" : "")}
-        ${stat(oublis.length, "Pointages oubliés", oublis.length ? "danger" : "")}
+        ${mgrStats}
       </div>
 
       <div class="p-cols">
         <div class="p-col">
-          <div class="tab-section-label">Présents actuellement</div>
-          ${presents.length ? presents.map(m => {
-            const p = openPointage(m.id);
-            const min = (Date.now() - new Date(p.arrivee)) / 60000;
-            return `<div class="plain-card ok-bg"><div class="pc-icon green">${avatar(m, 30)}</div>
-              <div class="pc-body"><div class="pc-title">${esc(membreNom(m.id))}</div>
-              <div class="pc-meta">Arrivé·e à ${fmtTime(p.arrivee)} · ${fmtHM(min)} de présence</div></div>
-              <span class="due-badge ok">En poste</span></div>`;
-          }).join("") : `<p class="pc-meta">Personne n'est pointé pour le moment.</p>`}
+          <div class="tab-section-label">Aujourd'hui — ${esc(jourComplet(new Date()))}</div>
+          ${ferie ? `<div class="plain-card"><div class="pc-icon red">🎌</div><div class="pc-body"><div class="pc-title">Jour férié</div><div class="pc-meta">${esc(ferie)} — cabinet fermé.</div></div></div>` : ""}
+          ${!ferie && ferm ? `<div class="plain-card"><div class="pc-icon amber">🔒</div><div class="pc-body"><div class="pc-title">Cabinet fermé</div><div class="pc-meta">${esc(ferm.nom)}</div></div></div>` : ""}
+          ${absents.map(x => { const t = PLANNING_TYPES[x.e.type] || PLANNING_TYPES.absence; return `<div class="plain-card">
+            <div class="pc-icon amber">${avatar(x.m, 30)}</div>
+            <div class="pc-body"><div class="pc-title">${esc(membreNom(x.m.id))}</div>
+            <div class="pc-meta">${t.ico} ${esc(t.label)}${x.e.note ? " · " + esc(x.e.note) : ""}</div></div></div>`; }).join("")}
+          ${(!ferie && !ferm && !absents.length) ? `<p class="pc-meta">Aucune absence prévue aujourd'hui. ✅</p>` : ""}
+          ${presents.length ? `<p class="pc-meta" style="margin-top:8px">Prévu·es : ${presents.map(m => esc(m.prenom)).join(", ")}.</p>` : ""}
         </div>
 
         <div class="p-col">
-          <div class="tab-section-label">Alertes</div>
-          ${oublis.map(m => `<div class="plain-card late"><div class="pc-icon red">⏰</div>
-            <div class="pc-body"><div class="pc-title">Pointage oublié</div>
-            <div class="pc-meta">${esc(membreNom(m.id))} était prévu·e aujourd'hui sans pointage.</div></div>
-            <button class="link-action" data-pact="goto-badgeuse">Badger</button></div>`).join("")}
-          ${depass.map(x => `<div class="plain-card"><div class="pc-icon amber">📈</div>
-            <div class="pc-body"><div class="pc-title">Heures dépassées</div>
-            <div class="pc-meta">${esc(membreNom(x.m.id))} : ${fmtHM(x.real)} réalisées cette semaine (contrat ${x.m.heuresSemaine}h).</div></div>
-            <span class="due-badge warn">+${fmtHM(x.real - x.contrat)}</span></div>`).join("")}
-          ${(!oublis.length && !depass.length) ? `<p class="pc-meta">Aucune alerte. ✅</p>` : ""}
+          <div class="tab-section-label">${mgr ? "Demandes à traiter" : "Mes demandes"}</div>
+          ${mgr
+            ? (enAttente.length ? enAttente.map(demandeCard).join("") : `<p class="pc-meta">Aucune demande en attente. ✅</p>`)
+            : (() => { const mine = state.demandes.filter(d => d.membreId === sessionUser.id).slice().sort((a, b) => (b.createdAt || "").localeCompare(a.createdAt || "")).slice(0, 5); return mine.length ? mine.map(demandeCard).join("") : `<p class="pc-meta">Aucune demande. Utilisez l'onglet « Demandes » pour en créer une.</p>`; })()}
         </div>
       </div>
 
-      ${enAttente.length ? `
-        <div class="tab-section-label" style="margin-top:22px">Demandes à traiter</div>
-        ${enAttente.map(demandeCard).join("")}` : ""}
+      ${sessionUser.salarie ? carteConges(sessionUser) : ""}
+      ${mgr ? `<div class="tab-section-label" style="margin-top:22px">Raccourcis employeur</div>
+        <div class="p-shortcuts">
+          <button class="btn btn-soft" data-pact="goto-suivi">🔒 Noter un retard, des heures sup. ou une absence</button>
+          <button class="btn btn-soft" data-pact="goto-resume">🧾 Préparer le résumé pour le comptable</button>
+          <button class="btn btn-soft" data-pact="goto-bilan">📅 Voir le bilan annuel</button>
+        </div>` : ""}
+    `;
+  }
+  // Encadré « Mes congés payés » (toute personne salariée connectée)
+  function carteConges(m) {
+    const cp = situationConges(m, 0);
+    const a = cp.acq;
+    const depuis = a.mode === "fixe" ? "" : ` depuis le ${fmtLong(a.depuis)} (${a.mois} mois complet${a.mois > 1 ? "s" : ""})`;
+    return `
+      <div class="tab-section-label" style="margin-top:22px">Mes congés payés — période ${esc(cp.per.label)}</div>
+      <div class="cp-card">
+        <div class="cp-stat"><div class="cp-n">${fmtNum(cp.acq.total)} j</div><div class="cp-l">acquis à ce jour${a.report ? `<br><span>dont ${fmtNum(a.report)} j de report</span>` : ""}</div></div>
+        <div class="cp-stat"><div class="cp-n">${fmtNum(cp.pris)} j</div><div class="cp-l">pris sur la période</div></div>
+        <div class="cp-stat cp-solde"><div class="cp-n">${fmtNum(cp.solde)} j</div><div class="cp-l">solde disponible</div></div>
+        <div class="cp-stat"><div class="cp-n">${fmtNum(cp.soldeFin)} j</div><div class="cp-l">solde prévu au ${fmtDate(cp.per.to)}</div></div>
+      </div>
+      <p class="pc-meta" style="margin-top:8px">${a.mode === "fixe" ? `Droit annuel de ${fmtNum(m.congesAcquis || 0)} jours ouvrés.` : `${fmtNum(m.congesAcquis || 0)} jours ouvrés par an, soit ${String(Math.round(a.taux * 100) / 100).replace(".", ",")} j acquis par mois complet de présence${depuis}.`} Les congés pris comprennent les congés validés, les fermetures du cabinet et les jours notés par l'employeur.</p>
     `;
   }
 
   /* =========================================================
-     VUE — PLANNING (semaine)
+     BILAN ANNUEL (employeur uniquement)
+     Par personne : absences par type (jours et épisodes), retards,
+     heures supplémentaires, situation des congés payés.
+     ========================================================= */
+  function buildBilan() {
+    const today = iso(new Date());
+    const per = periodeRef(today, view.bilanOffset);
+    const asOf = today < per.to ? (today < per.from ? per.from : today) : per.to;
+    const blocs = membresTries().map(m => {
+      const st = absencesPour(m, per.from, per.to);
+      const acq = acquisConges(m, per, asOf);
+      const pris = congesPrisPeriode(m, per.from, per.to);
+      return { m, nom: m.prenom + " " + m.nom, st, acq, pris, solde: round1(acq.total - pris) };
+    });
+    const equipe = blocs.reduce((t, b) => { t.jours += b.st.joursAbs; t.episodes += b.st.episodes; t.retards += b.st.nbRetards; t.retardMin += b.st.retardMin; t.supMin += b.st.supMin; return t; }, { jours: 0, episodes: 0, retards: 0, retardMin: 0, supMin: 0 });
+    // Texte brut
+    const out = ["Cabinet dentaire Cybèle Dent — Bilan annuel du personnel — " + per.label + " (" + per.detail + ")", "Établi le " + fmtLong(today), ""];
+    blocs.forEach(b => {
+      out.push(b.nom + " (" + b.m.role + ")");
+      out.push("  Absences : " + bilanAbsTexte(b.st));
+      out.push("  Retards : " + (b.st.nbRetards ? b.st.nbRetards + " (" + fmtDuree(b.st.retardMin) + " au total)" : "aucun"));
+      out.push("  Heures supplémentaires : " + (b.st.supMin ? fmtDuree(b.st.supMin) : "aucune"));
+      if (b.m.salarie) out.push("  Congés payés : acquis " + fmtNum(b.acq.total) + " j" + (b.acq.report ? " (dont report " + fmtNum(b.acq.report) + " j)" : "") + " · pris " + fmtNum(b.pris) + " j · solde " + fmtNum(b.solde) + " j");
+      out.push("");
+    });
+    out.push("Équipe : " + fmtJours(equipe.jours) + " d'absence (" + equipe.episodes + " épisode" + (equipe.episodes > 1 ? "s" : "") + ") · " + equipe.retards + " retard" + (equipe.retards > 1 ? "s" : "") + " (" + fmtDuree(equipe.retardMin) + ") · " + fmtDuree(equipe.supMin) + " d'heures supplémentaires");
+    return { per, asOf, blocs, equipe, texte: out.join("\n") };
+  }
+  function bilanAbsTexte(st) {
+    if (!st.episodes) return "aucune";
+    const parts = Object.keys(st.parType).sort((a, b) => st.parType[b].jours - st.parType[a].jours)
+      .map(k => lc1(k) + " " + fmtJours(st.parType[k].jours) + " (" + st.parType[k].episodes + " fois)");
+    return fmtJours(st.joursAbs) + " en " + st.episodes + " épisode" + (st.episodes > 1 ? "s" : "") + " — " + parts.join(" · ");
+  }
+  function viewBilan() {
+    const b = buildBilan();
+    return `
+      <div class="pl-toolbar">
+        <button class="btn-nav" data-pact="bilan-prev">‹</button>
+        <div class="pl-week">Période ${esc(b.per.label)}</div>
+        <button class="btn-nav" data-pact="bilan-next">›</button>
+        <button class="btn btn-soft" data-pact="bilan-today">Période en cours</button>
+        <span style="flex:1"></span>
+        <button class="btn btn-soft" data-pact="bilan-copy">📋 Copier</button>
+        <button class="btn btn-soft" data-pact="bilan-print">🖨 Imprimer</button>
+        <button class="btn btn-soft" data-pact="params-planning">⚙ Réglages congés</button>
+      </div>
+      <div class="sv-private">🔒 Visible uniquement par vous. ${esc(b.per.detail.charAt(0).toUpperCase() + b.per.detail.slice(1))} · congés acquis calculés au ${esc(fmtLong(b.asOf))}.</div>
+      <div class="rs-sheet" id="bl-sheet">
+        <div class="rs-title">Cabinet dentaire Cybèle Dent — Bilan annuel du personnel</div>
+        <div class="rs-sub">Période ${esc(b.per.label)} · établi le ${esc(fmtLong(iso(new Date())))}</div>
+        <div class="bl-equipe">
+          <div class="cp-stat"><div class="cp-n">${fmtNum(b.equipe.jours)} j</div><div class="cp-l">d'absence dans l'équipe<br><span>${b.equipe.episodes} épisode${b.equipe.episodes > 1 ? "s" : ""}</span></div></div>
+          <div class="cp-stat"><div class="cp-n">${b.equipe.retards}</div><div class="cp-l">retard${b.equipe.retards > 1 ? "s" : ""}<br><span>${fmtDuree(b.equipe.retardMin)} au total</span></div></div>
+          <div class="cp-stat"><div class="cp-n">${fmtHM(b.equipe.supMin)}</div><div class="cp-l">heures supplémentaires</div></div>
+        </div>
+        ${b.blocs.map(x => `<div class="rs-bloc bl-bloc">
+          <div class="rs-nom">${avatar(x.m, 26)} ${esc(x.nom)} <span class="pc-meta">· ${esc(x.m.role)}</span></div>
+          <div class="bl-grid">
+            <div class="bl-item"><div class="bl-k">Absences</div><div class="bl-v">${x.st.episodes ? `<strong>${fmtJours(x.st.joursAbs)}</strong> en ${x.st.episodes} épisode${x.st.episodes > 1 ? "s" : ""}` : "aucune"}</div>
+              ${x.st.episodes ? `<ul class="bl-types">${Object.keys(x.st.parType).sort((p, q) => x.st.parType[q].jours - x.st.parType[p].jours).map(k => `<li>${absIco(k)} ${esc(k)} : <strong>${fmtJours(x.st.parType[k].jours)}</strong> <span class="pc-meta">(${x.st.parType[k].episodes} fois)</span></li>`).join("")}</ul>` : ""}</div>
+            <div class="bl-item"><div class="bl-k">Retards</div><div class="bl-v">${x.st.nbRetards ? `<strong>${x.st.nbRetards}</strong> · ${fmtDuree(x.st.retardMin)} au total` : "aucun"}</div></div>
+            <div class="bl-item"><div class="bl-k">Heures sup.</div><div class="bl-v">${x.st.supMin ? `<strong>${fmtDuree(x.st.supMin)}</strong>` : "aucune"}</div></div>
+            ${x.m.salarie ? `<div class="bl-item"><div class="bl-k">Congés payés</div><div class="bl-v">acquis <strong>${fmtNum(x.acq.total)} j</strong>${x.acq.report ? ` <span class="pc-meta">(dont report ${fmtNum(x.acq.report)})</span>` : ""} · pris <strong>${fmtNum(x.pris)} j</strong> · solde <strong class="${x.solde < 0 ? "t-neg" : ""}">${fmtNum(x.solde)} j</strong></div></div>` : ""}
+          </div>
+        </div>`).join("")}
+      </div>
+      <textarea id="bl-text" hidden>${esc(b.texte)}</textarea>
+    `;
+  }
+  function bilanCopy() {
+    const t = document.getElementById("bl-text");
+    const txt = t ? t.value : buildBilan().texte;
+    const done = () => toast("Bilan copié.");
+    if (navigator.clipboard && navigator.clipboard.writeText) navigator.clipboard.writeText(txt).then(done).catch(() => fallbackCopy(txt, done));
+    else fallbackCopy(txt, done);
+  }
+  function jourComplet(d) {
+    const jn = ["dimanche", "lundi", "mardi", "mercredi", "jeudi", "vendredi", "samedi"][d.getDay()];
+    return jn.charAt(0).toUpperCase() + jn.slice(1) + " " + d.getDate() + " " + MOIS[d.getMonth()] + " " + d.getFullYear();
+  }
+
+  /* =========================================================
+     VUE — PLANNING (semaine, partagé)
      ========================================================= */
   function viewPlanning() {
     const ws = view.weekStart;
     const nDays = state.reglages.afficherWeekend ? 7 : 5;
     const days = Array.from({ length: nDays }, (_, i) => isoAdd(ws, i));
     const todayI = iso(new Date());
-    // Infos jour férié / fermeture cabinet / vacances scolaires (Zone A) par date
     const dayInfo = days.map(d => ({ ferie: ferieNom(d), ferm: fermetureFor(d), vac: vacancesNom(d) }));
 
     const head = `<div class="pl-row pl-head">
@@ -488,12 +661,10 @@
       }).join("")}
     </div>`;
 
-    const rows = state.membres.filter(m => m.actif).map(m => {
+    const rows = membresActifs().map(m => {
       const cells = days.map((d, i) => {
         const info = dayInfo[i];
-        // Jour férié : cabinet fermé, aucune planification possible (écrase l'existant)
         if (info.ferie) return `<div class="pl-cell pl-ferie-cell pl-col-ferie" data-pferie="${esc(info.ferie)}" title="Jour férié — ${esc(info.ferie)} (cabinet fermé)"><span class="pl-type">🎌 Férié</span><span class="pl-hours">Fermé</span></div>`;
-        // Fermeture du cabinet : fermé pour tous ; salarié·e = congé décompté
         if (info.ferm) {
           return m.salarie
             ? `<div class="pl-cell pl-conge pl-ferm-conge" data-pferm="${esc(info.ferm.nom)}" title="Fermeture : ${esc(info.ferm.nom)} — congé"><span class="pl-type">🌴 Congé</span><span class="pl-hours">Fermeture</span></div>`
@@ -527,135 +698,310 @@
         <div class="pl-legend">${Object.values(PLANNING_TYPES).map(t => `<span class="pl-leg pl-${t.cls}">${t.ico} ${t.label}</span>`).join("")}</div>
       </div>
       <div class="print-title">Cabinet dentaire Cybèle Dent — Planning de la semaine du ${fmtDate(ws)}</div>
-      ${state.membres.filter(m => m.actif).length ? `<div class="pl-grid ${nDays === 7 ? "d7" : "d5"}">${head}${rows}</div>` : emptyBox("👤", "Aucun membre", "Ajoutez d'abord des membres dans l'onglet « Membres ».")}
+      ${membresActifs().length ? `<div class="pl-grid ${nDays === 7 ? "d7" : "d5"}">${head}${rows}</div>` : emptyBox("👤", "Aucun membre", "Ajoutez d'abord des membres dans l'onglet « Membres ».")}
       <p class="pc-meta pl-tip" style="margin-top:10px">Astuce : cliquez sur une case pour définir présence (un ou plusieurs créneaux), congé, absence…</p>
     `;
   }
 
   /* =========================================================
-     VUE — BADGEUSE (kiosque)
+     VUE — SUIVI PRIVÉ (employeur uniquement)
+     Retards, heures supplémentaires, absences — mois par mois.
      ========================================================= */
-  function viewBadgeuse() {
-    const today = iso(new Date());
-    const todayPts = state.pointages.filter(p => p.date === today);
-    return `
-      <div class="badge-kiosk">
-        <div class="badge-clock" id="badge-clock">--:--:--</div>
-        <div class="badge-date">${jourComplet(new Date())}</div>
-        <p class="pc-meta" style="text-align:center;margin-bottom:18px">Sélectionnez votre nom pour pointer votre arrivée ou votre départ.</p>
-        <div class="badge-grid">
-          ${state.membres.filter(m => m.actif).map(m => {
-            const op = openPointage(m.id);
-            return `<button class="badge-card ${op ? "in" : ""}" data-pbadge="${m.id}">
-              ${avatar(m, 52)}
-              <div class="badge-name">${esc(m.prenom)}<br>${esc(m.nom)}</div>
-              <div class="badge-state">${op ? "🟢 En poste depuis " + fmtTime(op.arrivee) + ' <span class="badge-elapsed" data-since="' + op.arrivee + '"></span>' : "⚪ Pointer l'arrivée"}</div>
-            </button>`;
-          }).join("")}
-        </div>
-        <div class="tab-section-label" style="margin-top:26px">Pointages du jour</div>
-        ${todayPts.length ? todayPts.slice().reverse().map(p => `<div class="plain-card">
-          <div class="pc-icon ${p.depart ? "green" : "amber"}">${avatar(membre(p.membreId), 30)}</div>
-          <div class="pc-body"><div class="pc-title">${esc(membreNom(p.membreId))}</div>
-          <div class="pc-meta">Arrivée ${fmtTime(p.arrivee)}${p.depart ? " · Départ " + fmtTime(p.depart) + " · " + fmtHM(pointageMinutes(p)) : " · en cours…"}</div></div>
-          ${p.depart ? `<span class="due-badge ok">${fmtHM(pointageMinutes(p))}</span>` : `<span class="due-badge warn">En cours</span>`}
-        </div>`).join("") : `<p class="pc-meta">Aucun pointage aujourd'hui.</p>`}
-      </div>`;
-  }
-  function jourComplet(d) {
-    const jn = ["dimanche", "lundi", "mardi", "mercredi", "jeudi", "vendredi", "samedi"][d.getDay()];
-    return jn.charAt(0).toUpperCase() + jn.slice(1) + " " + d.getDate() + " " + MOIS[d.getMonth()] + " " + d.getFullYear();
-  }
-  function startClock() {
-    const tick = () => {
-      const el = document.getElementById("badge-clock");
-      if (!el) { if (clockTimer) { clearInterval(clockTimer); clockTimer = null; } return; }
-      const d = new Date();
-      el.textContent = [d.getHours(), d.getMinutes(), d.getSeconds()].map(n => String(n).padStart(2, "0")).join(":");
-      document.querySelectorAll(".badge-elapsed").forEach(s => {
-        const min = (Date.now() - new Date(s.dataset.since)) / 60000;
-        s.textContent = "(" + fmtHM(min) + ")";
-      });
-    };
-    tick();
-    clockTimer = setInterval(tick, 1000);
-  }
-  function pointer(m) {
-    const op = openPointage(m.id);
-    const pin = prompt(`Code PIN de ${m.prenom} ${m.nom} :`);
-    if (pin === null) return;
-    if (String(pin) !== String(m.pin)) { toast("Code PIN incorrect."); return; }
-    if (op) {
-      op.depart = new Date().toISOString();
-      save(); toast(`Départ enregistré — ${fmtHM(pointageMinutes(op))} travaillées.`);
-    } else {
-      state.pointages.push({ id: uid(), membreId: m.id, date: iso(new Date()), arrivee: new Date().toISOString(), depart: "", pauseMin: 0 });
-      save(); toast(`Bonjour ${m.prenom}, arrivée enregistrée.`);
-    }
-    renderTab(); startClock();
-  }
+  function viewSuivi() {
+    const ym = view.monthRef, [y, mo] = ym.split("-").map(Number);
+    const { from, to } = monthBounds(ym);
+    const showWE = !!state.reglages.afficherWeekend;
+    const days = [];
+    for (let d = from; d <= to; d = isoAdd(d, 1)) if (showWE || !isWeekend(d)) days.push(d);
+    const todayI = iso(new Date());
+    const membres = membresTries();
 
-  /* =========================================================
-     VUE — TEMPS DE TRAVAIL (mois)
-     ========================================================= */
-  function viewTemps() {
-    const ym = view.monthRef;
-    const [y, mo] = ym.split("-").map(Number);
-    const from = ym + "-01";
-    const to = iso(new Date(y, mo, 0)); // dernier jour du mois
-    const rows = state.membres.filter(m => m.actif).map(m => {
-      const real = realMinutesIn(m.id, from, to);
-      const prevu = plannedMinutesIn(m.id, from, to);
-      const jours = new Set(state.pointages.filter(p => p.membreId === m.id && p.date >= from && p.date <= to && p.depart).map(p => p.date)).size;
-      const contratMois = (m.heuresSemaine || 0) * 60 * 52 / 12;
-      const sup = Math.max(0, real - contratMois);
-      const ecart = real - prevu;
-      return { m, real, prevu, jours, sup, ecart };
-    });
+    const head = `<div class="sv-row sv-head">
+      <div class="sv-name">Membre</div>
+      ${days.map(d => {
+        const f = ferieNom(d), fm = fermetureFor(d);
+        const cls = (d === todayI ? "today " : "") + (f ? "sv-ferie" : fm ? "sv-ferm" : isWeekend(d) ? "sv-we" : "");
+        return `<div class="sv-cell sv-dayhead ${cls}" title="${esc(fmtDate(d))}${f ? " — " + esc(f) : fm ? " — " + esc(fm.nom) : ""}"><span class="sv-dow">${JOURS_1[weekdayOf(d)]}</span>${Number(d.slice(8))}</div>`;
+      }).join("")}
+      <div class="sv-total">Total</div>
+    </div>`;
+
+    const rows = membres.map(m => {
+      let nRet = 0, minRet = 0, minSup = 0, jAbs = 0;
+      const cells = days.map(d => {
+        const s = suiviOf(m.id, d);
+        const f = ferieNom(d), fm = fermetureFor(d);
+        const colCls = f ? " sv-col-ferie" : fm ? " sv-col-ferm" : isWeekend(d) ? " sv-col-we" : "";
+        if (!s || suiviVide(s)) {
+          // rappel discret du planning partagé (congé validé, maladie…) pour ne rien oublier
+          const e = state.planning.find(p => p.membreId === m.id && p.date === d && p.type !== "present" && p.type !== "repos");
+          const hint = e ? `<span class="sv-hint" title="Planning : ${esc((PLANNING_TYPES[e.type] || {}).label || e.type)}${e.note ? " — " + esc(e.note) : ""}">${(PLANNING_TYPES[e.type] || {}).ico || ""}</span>` : "";
+          return `<div class="sv-cell sv-empty${colCls}" data-scell="${m.id}|${d}">${hint}</div>`;
+        }
+        const marks = [];
+        if (s.absence) { const demi = s.duree !== "journee"; jAbs += demi ? 0.5 : 1; marks.push(`<span class="sv-mark sv-abs" title="${esc(s.absence)} (${DUREES[s.duree] || "journée"})">${absIco(s.absence)}${demi ? "½" : ""}</span>`); }
+        if (s.retardMin) { nRet++; minRet += s.retardMin; marks.push(`<span class="sv-mark sv-ret" title="Retard de ${esc(fmtDuree(s.retardMin))}">⏰${s.retardMin}</span>`); }
+        if (s.supMin) { minSup += s.supMin; marks.push(`<span class="sv-mark sv-sup" title="${esc(fmtDuree(s.supMin))} d'heures supplémentaires">➕${fmtHM(s.supMin)}</span>`); }
+        if (!marks.length && s.note) marks.push(`<span class="sv-mark sv-note" title="${esc(s.note)}">📝</span>`);
+        return `<div class="sv-cell sv-filled${colCls}" data-scell="${m.id}|${d}" title="${esc(s.note || "")}">${marks.join("")}</div>`;
+      }).join("");
+      const tot = [];
+      if (jAbs) tot.push(`<span class="sv-tot-abs">${fmtJours(jAbs)} abs.</span>`);
+      if (nRet) tot.push(`<span class="sv-tot-ret">${nRet} retard${nRet > 1 ? "s" : ""} (${fmtDuree(minRet)})</span>`);
+      if (minSup) tot.push(`<span class="sv-tot-sup">+${fmtHM(minSup)} sup.</span>`);
+      return `<div class="sv-row">
+        <div class="sv-name">${avatar(m, 28)}<div><div class="pl-mn">${esc(m.prenom)} ${esc(m.nom)}</div><div class="pl-mr">${esc(m.role)}</div></div></div>
+        ${cells}
+        <div class="sv-total">${tot.length ? tot.join("") : `<span class="pc-meta">—</span>`}</div>
+      </div>`;
+    }).join("");
+
     return `
       <div class="pl-toolbar">
         <button class="btn-nav" data-pact="month-prev">‹</button>
-        <div class="pl-week">${MOIS[mo - 1]} ${y}</div>
+        <div class="pl-week">${MOIS[mo - 1].charAt(0).toUpperCase() + MOIS[mo - 1].slice(1)} ${y}</div>
         <button class="btn-nav" data-pact="month-next">›</button>
+        <button class="btn btn-soft" data-pact="month-today">Ce mois-ci</button>
+        <button class="btn btn-primary" data-pact="suivi-add">＋ Noter</button>
         <span style="flex:1"></span>
-        <button class="btn btn-primary" data-pact="export-paie">⬇ Export paie (CSV)</button>
+        <div class="pl-legend">
+          <span class="pl-leg sv-leg-ret">⏰ Retard (min)</span>
+          <span class="pl-leg sv-leg-sup">➕ Heures sup.</span>
+          <span class="pl-leg sv-leg-abs">🌴 Congé payé · 🌙 Sans solde · 🟠 Absence · 🔴 Maladie</span>
+        </div>
       </div>
-      <div class="t-table-wrap"><table class="t-table">
-        <thead><tr><th>Membre</th><th>Jours</th><th>Prévu</th><th>Réel</th><th>Écart</th><th>Heures sup.</th></tr></thead>
-        <tbody>
-          ${rows.map(r => `<tr>
-            <td class="t-name">${avatar(r.m, 28)} ${esc(r.m.prenom)} ${esc(r.m.nom)}</td>
-            <td>${r.jours}</td>
-            <td>${fmtHM(r.prevu)}</td>
-            <td><strong>${fmtHM(r.real)}</strong></td>
-            <td class="${r.ecart < 0 ? "t-neg" : "t-pos"}">${r.ecart >= 0 ? "+" : ""}${fmtHM(r.ecart)}</td>
-            <td>${r.sup > 0 ? `<span class="due-badge warn">${fmtHM(r.sup)}</span>` : "—"}</td>
-          </tr>`).join("")}
-        </tbody>
-      </table></div>
-      <p class="pc-meta" style="margin-top:10px">« Réel » = heures pointées à la badgeuse. « Heures sup. » = au-delà du contrat mensualisé. L'export CSV est prêt à envoyer au comptable.</p>
+      <div class="sv-private">🔒 Cet onglet n'est visible que par vous (compte employeur). Les membres de l'équipe ne voient pas ces informations.</div>
+      ${membres.length ? `<div class="sv-grid-wrap"><div class="sv-grid" style="--sv-days:${days.length}">${head}${rows}</div></div>` : emptyBox("👤", "Aucun membre", "Ajoutez d'abord des membres dans l'onglet « Membres ».")}
+      <p class="pc-meta pl-tip" style="margin-top:10px">Cliquez sur une case pour noter un retard, des heures supplémentaires ou une absence. Les petites icônes grisées rappellent ce qui est déjà dans le planning partagé (congés validés, maladie…) et seront reprises automatiquement dans le résumé comptable.</p>
     `;
   }
+  function absIco(type) {
+    if (/sans solde/i.test(type)) return "🌙";
+    if (/Congé payé|RTT/i.test(type)) return "🌴";
+    if (/Maladie/i.test(type)) return "🔴";
+    if (/Formation/i.test(type)) return "🎓";
+    return "🟠";
+  }
 
-  function exportPaie() {
-    const ym = view.monthRef, [y, mo] = ym.split("-").map(Number);
-    const from = ym + "-01", to = iso(new Date(y, mo, 0));
-    const sep = ";";
-    const lines = [["Membre", "Role", "Jours travailles", "Heures prevues", "Heures reelles", "Heures sup", "Conges pris (annee)", "Solde conges"].join(sep)];
-    state.membres.filter(m => m.actif).forEach(m => {
-      const real = realMinutesIn(m.id, from, to), prevu = plannedMinutesIn(m.id, from, to);
-      const jours = new Set(state.pointages.filter(p => p.membreId === m.id && p.date >= from && p.date <= to && p.depart).map(p => p.date)).size;
-      const sup = Math.max(0, real - (m.heuresSemaine || 0) * 60 * 52 / 12);
-      const h = (min) => (min / 60).toFixed(2).replace(".", ",");
-      lines.push([m.prenom + " " + m.nom, m.role, jours, h(prevu), h(real), h(sup), congesPris(m.id), soldeConges(m)].join(sep));
+  /* ---- Modale de suivi (une personne, un jour) ---- */
+  function modalSuivi(membreId, date) {
+    if (!isManager()) { toast("Réservé à l'employeur."); return; }
+    const pick = !membreId || !date; // mode "＋ Noter" : on choisit la personne et la date
+    const existing = (!pick) ? suiviOf(membreId, date) : null;
+    const s = existing || { retardMin: 0, supMin: 0, absence: "", duree: "journee", note: "" };
+    const opts = membresTries().map(m => ({ v: m.id, l: m.prenom + " " + m.nom }));
+    const supH = s.supMin ? fmtHM(s.supMin) : "";
+    const body = `
+      ${pick ? `<div class="field-row">${fSelect("membreId", "Personne", opts[0] && opts[0].v, opts)}${fText("date", "Date", iso(new Date()), { type: "date" })}</div>`
+             : `<p class="pc-meta" style="margin-bottom:12px"><strong>${esc(membreNom(membreId))}</strong> — ${esc(fmtLong(date))}</p>`}
+      <div class="sv-form-block">
+        <div class="sv-form-title">⏰ Retard</div>
+        ${fText("retard", "Minutes de retard (vide = pas de retard)", s.retardMin || "", { type: "number", ph: "ex. 15", attrs: ' min="0" step="5" inputmode="numeric"' })}
+      </div>
+      <div class="sv-form-block">
+        <div class="sv-form-title">➕ Heures supplémentaires</div>
+        ${fText("sup", "Durée (vide = aucune)", supH, { ph: "ex. 1h30 ou 45 min" })}
+        <p class="field-hint">Écrivez par exemple « 1h30 », « 45 min » ou « 2h ».</p>
+      </div>
+      <div class="sv-form-block">
+        <div class="sv-form-title">🚫 Absence</div>
+        ${fSelect("absence", "Type", s.absence, [{ v: "", l: "— Pas d'absence —" }].concat(SUIVI_ABSENCES))}
+        ${fSelect("duree", "Durée", s.duree || "journee", [{ v: "journee", l: "Journée entière" }, { v: "matin", l: "Matin seulement" }, { v: "apresmidi", l: "Après-midi seulement" }])}
+      </div>
+      ${fText("note", "Note (facultatif, visible uniquement par vous)", s.note, { ph: "ex. prévenu la veille" })}
+    `;
+    const ov = openModal(existing ? "Modifier le suivi" : "Noter dans le suivi privé", body, (ov) => {
+      const mid = pick ? val(ov, "membreId") : membreId;
+      const d = pick ? val(ov, "date") : date;
+      if (!mid || !d) { toast("Choisissez la personne et la date."); return false; }
+      const retard = Math.max(0, parseInt(val(ov, "retard"), 10) || 0);
+      const supRaw = val(ov, "sup");
+      const sup = parseDuree(supRaw);
+      if (supRaw && sup == null) { toast("Durée d'heures sup. non comprise — écrivez par exemple 1h30 ou 45 min."); return false; }
+      const absence = val(ov, "absence");
+      const data = { membreId: mid, date: d, retardMin: retard, supMin: sup, absence, duree: absence ? val(ov, "duree") : "journee", note: val(ov, "note") };
+      const target = suiviOf(mid, d);
+      if (suiviVide(data)) {
+        if (target) { prive.suivi = prive.suivi.filter(x => x !== target); savePrive(); renderTab(); toast("Suivi effacé pour ce jour."); }
+        return;
+      }
+      if (target) Object.assign(target, data); else prive.suivi.push({ id: uid(), ...data });
+      savePrive();
+      if (pick) view.monthRef = d.slice(0, 7);
+      renderTab();
+      toast("Suivi enregistré.");
     });
-    const csv = "﻿" + lines.join("\r\n");
-    const blob = new Blob([csv], { type: "text/csv;charset=utf-8" });
+    if (existing) {
+      const foot = ov.querySelector(".modal-foot");
+      const del = document.createElement("button");
+      del.className = "btn btn-soft"; del.textContent = "Effacer"; del.style.flex = "0 0 auto";
+      del.onclick = () => { prive.suivi = prive.suivi.filter(x => x !== existing); savePrive(); renderTab(); modalRoot.innerHTML = ""; toast("Suivi effacé."); };
+      foot.insertBefore(del, foot.firstChild);
+    }
+    const toggleDuree = () => { const sel = ov.querySelector("[name=duree]").closest(".field"); sel.style.display = ov.querySelector("[name=absence]").value ? "block" : "none"; };
+    ov.querySelector("[name=absence]").onchange = toggleDuree; toggleDuree();
+  }
+
+  /* =========================================================
+     RÉSUMÉ COMPTABLE (employeur uniquement)
+     Texte simple, une ligne par événement, prêt à copier/envoyer.
+     ========================================================= */
+  // Événements d'une personne sur une période : suivi privé + planning partagé (congés validés, maladie…)
+  function evenementsPour(m, from, to) {
+    const ev = [];
+    for (let d = from; d <= to; d = isoAdd(d, 1)) {
+      const s = suiviOf(m.id, d);
+      if (s) {
+        if (s.absence) ev.push({ kind: "abs", date: d, label: s.absence, demi: s.duree !== "journee" ? s.duree : "", note: s.note });
+        if (s.retardMin) ev.push({ kind: "retard", date: d, min: s.retardMin, note: s.absence ? "" : s.note });
+        if (s.supMin) ev.push({ kind: "sup", date: d, min: s.supMin, note: (s.absence || s.retardMin) ? "" : s.note });
+      }
+      if (s && s.absence) continue;        // le suivi privé prime sur le planning pour ce jour
+      if (!isOuvre(d)) continue;           // week-end et jours fériés : rien à signaler
+      const fm = fermetureFor(d);
+      if (fm) { if (m.salarie) ev.push({ kind: "abs", date: d, label: "Congé payé (fermeture du cabinet)", demi: "", note: "" }); continue; }
+      const p = state.planning.find(x => x.membreId === m.id && x.date === d);
+      if (!p || p.type === "present" || p.type === "repos") continue;
+      let label;
+      if (p.type === "conge") label = /Congé payé|RTT/i.test(p.note || "") ? (p.note.match(/Congé payé|RTT/i)[0]) : "Congé payé";
+      else if (p.type === "conge_ss") label = "Congé sans solde";
+      else if (p.type === "maladie") label = "Maladie (arrêt)";
+      else if (p.type === "formation") label = "Formation";
+      else label = "Absence";
+      ev.push({ kind: "abs", date: d, label, demi: "", note: "" });
+    }
+    return ev;
+  }
+  // Deux dates sont "consécutives" si seuls des week-ends / fériés les séparent
+  function joursConsecutifs(a, b) {
+    for (let d = isoAdd(a, 1); d < b; d = isoAdd(d, 1)) if (isOuvre(d)) return false;
+    return b > a;
+  }
+  // Absences regroupées en périodes (épisodes) + statistiques, pour une personne et une période
+  function absencesPour(m, from, to) {
+    const ev = evenementsPour(m, from, to);
+    const runs = [];
+    ev.filter(e => e.kind === "abs").forEach(e => {
+      const last = runs[runs.length - 1];
+      if (last && last.label === e.label && !last.demi && !e.demi && joursConsecutifs(last.to, e.date)) { last.to = e.date; last.jours += 1; }
+      else runs.push({ kind: "abs", label: e.label, from: e.date, to: e.date, jours: e.demi ? 0.5 : 1, demi: e.demi, note: e.note, date: e.date });
+    });
+    const parType = {};
+    runs.forEach(r => { const k = r.label.replace(/ \(fermeture du cabinet\)$/, ""); const t = parType[k] || (parType[k] = { jours: 0, episodes: 0 }); t.jours += r.jours; t.episodes++; });
+    const retards = ev.filter(e => e.kind === "retard");
+    return {
+      ev, runs, parType,
+      joursAbs: runs.reduce((s, r) => s + r.jours, 0), episodes: runs.length,
+      nbRetards: retards.length, retardMin: retards.reduce((s, e) => s + e.min, 0),
+      supMin: ev.filter(e => e.kind === "sup").reduce((s, e) => s + e.min, 0),
+    };
+  }
+  function lignesPour(m, from, to) {
+    const { ev, runs } = absencesPour(m, from, to);
+    const items = runs.concat(ev.filter(e => e.kind !== "abs")).sort((a, b) => (a.date + a.kind).localeCompare(b.date + b.kind));
+    const lines = items.map(it => {
+      const note = it.note ? " — " + it.note : "";
+      if (it.kind === "abs") {
+        const lab = lc1(it.label);
+        if (it.demi) return `${lab} le ${fmtLong(it.from)} (${DUREES[it.demi]})${note}`;
+        return it.from === it.to ? `${lab} le ${fmtLong(it.from)}${note}` : `${lab} ${fmtPeriode(it.from, it.to)} (${fmtJours(it.jours)})${note}`;
+      }
+      if (it.kind === "retard") return `retard de ${fmtDuree(it.min)} le ${fmtLong(it.date)}${note}`;
+      return `${fmtDuree(it.min)} d'heures supplémentaires le ${fmtLong(it.date)}${note}`;
+    });
+    // Totaux
+    const totAbs = {};
+    runs.forEach(r => { totAbs[r.label] = (totAbs[r.label] || 0) + r.jours; });
+    const retards = ev.filter(e => e.kind === "retard"), sup = ev.filter(e => e.kind === "sup").reduce((t, e) => t + e.min, 0);
+    const tot = Object.keys(totAbs).map(k => lc1(k) + " : " + fmtJours(totAbs[k]));
+    if (retards.length) tot.push(retards.length + " retard" + (retards.length > 1 ? "s" : "") + " (" + fmtDuree(retards.reduce((t, e) => t + e.min, 0)) + " au total)");
+    if (sup) tot.push(fmtDuree(sup) + " d'heures supplémentaires");
+    return { lines, total: tot };
+  }
+  function resumePeriode() {
+    if (view.resumeDu && view.resumeAu && view.resumeAu >= view.resumeDu) return { from: view.resumeDu, to: view.resumeAu, titre: fmtPeriode(view.resumeDu, view.resumeAu).replace(/^le /, "") };
+    const { from, to } = monthBounds(view.monthRef);
+    const [y, mo] = view.monthRef.split("-").map(Number);
+    return { from, to, titre: MOIS[mo - 1] + " " + y };
+  }
+  function buildResume() { // retourne { titre, blocs:[{nom, lines, total}], texte }
+    const { from, to, titre } = resumePeriode();
+    const membres = membresTries().filter(m => !view.resumeMembre || m.id === view.resumeMembre);
+    const blocs = membres.map(m => ({ nom: m.prenom + " " + m.nom, role: m.role, ...lignesPour(m, from, to) }));
+    const out = [];
+    out.push("Cabinet dentaire Cybèle Dent — Résumé du personnel — " + titre);
+    out.push("Établi le " + fmtLong(iso(new Date())));
+    out.push("");
+    blocs.forEach(b => {
+      if (!b.lines.length) { out.push(b.nom + " : rien à signaler."); out.push(""); return; }
+      b.lines.forEach(l => out.push(b.nom + " : " + l));
+      if (b.total.length) out.push("  → Total " + b.nom + " : " + b.total.join(" · "));
+      out.push("");
+    });
+    return { titre, from, to, blocs, texte: out.join("\n").trim() };
+  }
+  function viewResume() {
+    const r = buildResume();
+    const [y, mo] = view.monthRef.split("-").map(Number);
+    const opts = [{ v: "", l: "Toute l'équipe" }].concat(membresTries().map(m => ({ v: m.id, l: m.prenom + " " + m.nom })));
+    return `
+      <div class="pl-toolbar">
+        <button class="btn-nav" data-pact="month-prev">‹</button>
+        <div class="pl-week">${MOIS[mo - 1].charAt(0).toUpperCase() + MOIS[mo - 1].slice(1)} ${y}</div>
+        <button class="btn-nav" data-pact="month-next">›</button>
+        <button class="btn btn-soft" data-pact="month-today">Ce mois-ci</button>
+        <span style="flex:1"></span>
+        <button class="btn btn-soft" data-pact="resume-copy">📋 Copier</button>
+        <button class="btn btn-soft" data-pact="resume-print">🖨 Imprimer</button>
+        <button class="btn btn-soft" data-pact="resume-dl">⬇ Fichier texte</button>
+        <button class="btn btn-primary" data-pact="resume-mail">✉ Envoyer par email</button>
+      </div>
+      <div class="rs-filters">
+        <div class="field"><label>Personne</label><select id="rs-membre">${opts.map(o => `<option value="${esc(o.v)}" ${o.v === view.resumeMembre ? "selected" : ""}>${esc(o.l)}</option>`).join("")}</select></div>
+        <div class="field"><label>Période personnalisée — du</label><input type="date" id="rs-du" value="${esc(view.resumeDu)}"></div>
+        <div class="field"><label>au</label><input type="date" id="rs-au" value="${esc(view.resumeAu)}"></div>
+        ${(view.resumeDu || view.resumeAu) ? `<button class="btn btn-soft" data-pact="resume-reset" style="align-self:flex-end">✕ Revenir au mois</button>` : ""}
+      </div>
+      <div class="sv-private">🔒 Visible uniquement par vous. Le texte ci-dessous reprend le suivi privé <em>et</em> les congés / arrêts déjà notés dans le planning partagé.</div>
+      <div class="rs-sheet" id="rs-sheet">
+        <div class="rs-title">Cabinet dentaire Cybèle Dent — Résumé du personnel</div>
+        <div class="rs-sub">${esc(r.titre)} · établi le ${esc(fmtLong(iso(new Date())))}</div>
+        ${r.blocs.map(b => `<div class="rs-bloc">
+          <div class="rs-nom">${esc(b.nom)} <span class="pc-meta">· ${esc(b.role)}</span></div>
+          ${b.lines.length ? `<ul class="rs-lines">${b.lines.map(l => `<li>${esc(b.nom)} : ${esc(l)}</li>`).join("")}</ul>
+            ${b.total.length ? `<div class="rs-total">Total : ${esc(b.total.join(" · "))}</div>` : ""}`
+            : `<div class="rs-rien">Rien à signaler.</div>`}
+        </div>`).join("")}
+      </div>
+      <textarea id="rs-text" hidden>${esc(r.texte)}</textarea>
+    `;
+  }
+  function resumeTexte() { const t = document.getElementById("rs-text"); return t ? t.value : buildResume().texte; }
+  function resumeCopy() {
+    const txt = resumeTexte();
+    const done = () => toast("Résumé copié — collez-le dans un email ou un document.");
+    if (navigator.clipboard && navigator.clipboard.writeText) navigator.clipboard.writeText(txt).then(done).catch(() => fallbackCopy(txt, done));
+    else fallbackCopy(txt, done);
+  }
+  function fallbackCopy(txt, done) {
+    const ta = document.createElement("textarea"); ta.value = txt; ta.style.position = "fixed"; ta.style.opacity = "0";
+    document.body.appendChild(ta); ta.select();
+    try { document.execCommand("copy"); done(); } catch (e) { toast("Copie impossible — sélectionnez le texte à la main."); }
+    ta.remove();
+  }
+  function resumeDownload() {
+    const r = buildResume();
+    const blob = new Blob(["﻿" + r.texte], { type: "text/plain;charset=utf-8" });
     const a = document.createElement("a");
     a.href = URL.createObjectURL(blob);
-    a.download = "paie-" + ym + ".csv";
+    a.download = "resume-personnel-" + r.from + "_" + r.to + ".txt";
     a.click(); URL.revokeObjectURL(a.href);
-    toast("Export paie téléchargé (" + MOIS[mo - 1] + " " + y + ").");
+    toast("Fichier texte téléchargé.");
+  }
+  function resumeMail() {
+    const r = buildResume();
+    const subject = "Cybèle Dent — Résumé du personnel — " + r.titre;
+    window.location.href = "mailto:?subject=" + encodeURIComponent(subject) + "&body=" + encodeURIComponent(r.texte);
   }
 
   /* =========================================================
@@ -679,15 +1025,15 @@
     const period = d.dateDebut === d.dateFin ? fmtDate(d.dateDebut) : fmtDate(d.dateDebut) + " → " + fmtDate(d.dateFin);
     const stBadge = d.statut === "valide" ? `<span class="due-badge ok">Validée</span>` :
       d.statut === "refuse" ? `<span class="due-badge late">Refusée</span>` : `<span class="due-badge warn">En attente</span>`;
-    const isManager = sessionUser && sessionUser.isManager;
+    const mgr = isManager();
     const isOwnPending = sessionUser && d.membreId === sessionUser.id && d.statut === "en_attente";
     const actions = d.statut === "en_attente"
-      ? (isManager
+      ? (mgr
           ? `<button class="btn-mini ok" data-valide="${d.id}">✓ Valider</button>
              <button class="btn-mini no" data-refuse="${d.id}">✕ Refuser</button>
              <button class="icon-btn del" data-del-demande="${d.id}" title="Supprimer">🗑</button>`
           : (isOwnPending ? `<button class="icon-btn del" data-del-demande="${d.id}" title="Annuler ma demande">🗑</button>` : ""))
-      : (isManager ? `<button class="icon-btn del" data-del-demande="${d.id}">🗑</button>` : "");
+      : (mgr ? `<button class="icon-btn del" data-del-demande="${d.id}">🗑</button>` : "");
     return `<div class="plain-card ${d.statut === "en_attente" ? "" : "ok-bg"}">
       <div class="pc-icon ${d.statut === "valide" ? "green" : d.statut === "refuse" ? "red" : "amber"}">${m ? avatar(m, 30) : "📩"}</div>
       <div class="pc-body">
@@ -705,29 +1051,29 @@
      VUE — MEMBRES
      ========================================================= */
   function viewMembres() {
-    const isMgr = sessionUser && sessionUser.isManager;
+    const mgr = isManager();
     const authOn = !!(window.CybeleAuth && window.CybeleAuth.available);
     return `
       <div class="section-add" style="margin-bottom:16px"><button class="btn btn-primary" data-pact="add-membre">＋ Nouveau membre</button></div>
       ${state.membres.length ? state.membres.map(m => {
         const bin = m.binomeId ? membre(m.binomeId) : null;
-        const solde = soldeConges(m);
+        const cp = situationConges(m, 0);
         const compte = m.login ? `🔑 ${esc(m.login)}` : `<span style="color:var(--warn)">🔑 pas de compte</span>`;
         return `<div class="plain-card ${m.actif ? "" : "off"}">
           <div class="pc-icon" style="background:transparent">${avatar(m, 40)}</div>
           <div class="pc-body">
-            <div class="pc-title">${esc(m.prenom)} ${esc(m.nom)} <span class="tag tag-type">${esc(m.role)}</span> ${m.salarie ? "" : '<span class="tag tag-place">non-salarié·e</span>'} ${!m.actif ? '<span class="tag tag-cat-poubelle">Inactif</span>' : ""}</div>
-            <div class="pc-meta">${m.heuresSemaine}h/sem.${bin ? " · 👥 " + esc(bin.prenom + " " + bin.nom) : ""} · 🌴 <strong>${solde} j</strong> (pris ${congesPris(m.id)}/${m.congesAcquis}) · PIN ${esc(m.pin)}</div>
+            <div class="pc-title">${esc(m.prenom)} ${esc(m.nom)} <span class="tag tag-type">${esc(m.role)}</span> ${m.isManager ? '<span class="tag tag-role">Employeur</span>' : ""} ${m.salarie ? "" : '<span class="tag tag-place">non-salarié·e</span>'} ${!m.actif ? '<span class="tag tag-cat-poubelle">Inactif</span>' : ""}</div>
+            <div class="pc-meta">${m.heuresSemaine}h/sem.${bin ? " · 👥 " + esc(bin.prenom + " " + bin.nom) : ""}${m.salarie ? ` · 🌴 solde <strong>${fmtNum(cp.solde)} j</strong> (acquis ${fmtNum(cp.acq.total)} · pris ${fmtNum(cp.pris)})` : ""}${m.dateEntree ? " · entrée le " + fmtDate(m.dateEntree) : ""}${mgr ? " · PIN " + esc(m.pin) : ""}</div>
             ${authOn ? `<div class="pc-meta" style="margin-top:2px">${compte}</div>` : ""}
           </div>
           <div class="pc-actions">
-            ${authOn && isMgr ? `<button class="icon-btn" data-compte-membre="${m.id}" title="Compte de connexion">🔑</button>` : ""}
-            <button class="icon-btn" data-edit-membre="${m.id}">✎</button>
-            <button class="icon-btn del" data-del-membre="${m.id}">🗑</button>
+            ${authOn && mgr ? `<button class="icon-btn" data-compte-membre="${m.id}" title="Compte de connexion">🔑</button>` : ""}
+            ${mgr || (sessionUser && sessionUser.id === m.id) ? `<button class="icon-btn" data-edit-membre="${m.id}">✎</button>` : ""}
+            ${mgr ? `<button class="icon-btn del" data-del-membre="${m.id}">🗑</button>` : ""}
           </div>
         </div>`;
       }).join("") : emptyBox("👤", "Aucun membre", "Ajoutez les praticiens, assistant·es et secrétaires du cabinet.")}
-      ${authOn && isMgr ? `<p class="pc-meta" style="margin-top:12px">🔑 Créez un compte de connexion pour chaque personne (identifiant + mot de passe). Elles s'y connecteront depuis leur téléphone.</p>` : ""}
+      ${authOn && mgr ? `<p class="pc-meta" style="margin-top:12px">🔑 Créez un compte de connexion pour chaque personne (identifiant + mot de passe). Elles s'y connecteront depuis leur téléphone.</p>` : ""}
     `;
   }
 
@@ -746,10 +1092,13 @@
       <div class="field-row">${fText("prenom", "Prénom *", m.prenom)}${fText("nom", "Nom *", m.nom)}</div>
       <div class="field-row">${fSelect("role", "Rôle", m.role, ROLES)}
         ${fSelect("binomeId", "Binôme", m.binomeId, [{ v: "", l: "— Aucun —" }].concat(others.map(o => ({ v: o.id, l: o.prenom + " " + o.nom }))))}</div>
-      <div class="field-row">${fText("heuresSemaine", "Heures / semaine", m.heuresSemaine, { type: "number" })}${fText("congesAcquis", "Congés acquis (jours/an)", m.congesAcquis, { type: "number" })}</div>
-      <div class="field-row">${fText("pin", "Code PIN (badgeuse)", m.pin)}
+      <div class="field-row">${fText("heuresSemaine", "Heures / semaine", m.heuresSemaine, { type: "number" })}${fText("congesAcquis", "Congés payés par an (jours ouvrés)", m.congesAcquis, { type: "number", attrs: ' step="0.5"' })}</div>
+      <div class="field-row">${fText("dateEntree", "Date d'entrée", m.dateEntree, { type: "date" })}${fText("reportConges", "Report période précédente (jours)", m.reportConges || 0, { type: "number", attrs: ' step="0.5"' })}</div>
+      <p class="field-hint" style="margin:-6px 0 12px">25 jours ouvrés par an = 2,08 jours acquis par mois complet de présence. Le report s'ajoute au solde de la période en cours.</p>
+      <div class="field-row">${fText("pin", "Code PIN (accès au module)", m.pin)}
         <div class="field"><label>Couleur</label><input type="color" name="couleur" value="${m.couleur}" style="height:44px;padding:4px"></div></div>
-      <label class="chk-line" style="margin-bottom:14px"><input type="checkbox" name="salarie" ${m.salarie ? "checked" : ""}> Salarié·e — mis·e en congés lors des fermetures du cabinet</label>
+      <label class="chk-line" style="margin-bottom:10px"><input type="checkbox" name="salarie" ${m.salarie ? "checked" : ""}> Salarié·e — mis·e en congés lors des fermetures du cabinet</label>
+      ${isManager() ? `<label class="chk-line" style="margin-bottom:14px"><input type="checkbox" name="isManager" ${m.isManager ? "checked" : ""}> Employeur — accès au suivi privé et au résumé comptable</label>` : ""}
       ${fSelect("actif", "Statut", m.actif ? "Actif" : "Inactif", ["Actif", "Inactif"])}
     `;
     openModal(isNew ? "Nouveau membre" : "Modifier le membre", body, (ov) => {
@@ -758,12 +1107,18 @@
       const data = {
         prenom, nom, role: val(ov, "role"), binomeId: val(ov, "binomeId"),
         heuresSemaine: parseFloat(val(ov, "heuresSemaine")) || 0, congesAcquis: parseFloat(val(ov, "congesAcquis")) || 0,
+        dateEntree: val(ov, "dateEntree"), reportConges: parseFloat(val(ov, "reportConges")) || 0,
         pin: val(ov, "pin"), couleur: val(ov, "couleur"), actif: val(ov, "actif") === "Actif",
         salarie: ov.querySelector("[name=salarie]").checked,
       };
+      const mgrChk = ov.querySelector("[name=isManager]");
+      if (mgrChk) {
+        if (!mgrChk.checked && m.isManager && state.membres.filter(x => x.isManager && x.id !== m.id).length === 0) { toast("Il faut au moins un compte employeur."); return false; }
+        data.isManager = mgrChk.checked;
+      }
       if (isNew) { const id = uid(); state.membres.push({ id, ...data }); reciprBinome(id, data.binomeId); }
       else { Object.assign(m, data); reciprBinome(m.id, data.binomeId); }
-      save(); renderTab();
+      save(); if (sessionUser && m.id === sessionUser.id) render(); else renderTab();
     }, isNew ? "Créer" : "Enregistrer");
   }
   function reciprBinome(id, binomeId) { // lien réciproque
@@ -779,7 +1134,7 @@
   }
   function modalCompte(m) {
     if (!m) return;
-    if (!sessionUser || !sessionUser.isManager) { toast("Réservé à l'employeur."); return; }
+    if (!isManager()) { toast("Réservé à l'employeur."); return; }
     if (!window.CybeleAuth) { toast("Authentification indisponible."); return; }
     const hasLogin = !!m.login;
     const body = hasLogin
@@ -847,6 +1202,7 @@
     const e = existing || { type: "present", note: "" };
     const typeOpts = Object.keys(PLANNING_TYPES).map(k => ({ v: k, l: PLANNING_TYPES[k].ico + " " + PLANNING_TYPES[k].label }));
     let slots = creneauxOf(e);
+    if (!slots.length) slots = (state.reglages.creneauxDefaut || []).map(c => ({ ...c }));
     if (!slots.length) slots = [{ debut: "09:00", fin: "18:00" }];
     const body = `
       <p class="pc-meta" style="margin-bottom:12px">${esc(membreNom(membreId))} — ${fmtDate(date)}</p>
@@ -875,10 +1231,8 @@
       save(); renderTab();
     });
 
-    // Éditeur de créneaux dynamique (helper partagé)
     slotEditor(ov.querySelector("#creneaux-list"), ov.querySelector("#add-creneau"), slots);
 
-    // bouton supprimer si existant
     if (existing) {
       const foot = ov.querySelector(".modal-foot");
       const del = document.createElement("button");
@@ -920,8 +1274,8 @@
   function appliquerHoraires(membreIds, du, au, jours, creneaux, overwrite) {
     let count = 0, cur = du, guard = 0;
     while (cur <= au && guard++ < 4000) {
-      const wd = (new Date(cur + "T00:00:00").getDay() + 6) % 7; // 0 = lundi
-      if (jours.includes(wd) && !ferieNom(cur) && !fermetureFor(cur)) { // saute fériés et fermetures
+      const wd = weekdayOf(cur);
+      if (jours.includes(wd) && !ferieNom(cur) && !fermetureFor(cur)) {
         membreIds.forEach(mid => {
           const ex = state.planning.find(p => p.membreId === mid && p.date === cur);
           if (!ex) { state.planning.push({ id: uid(), membreId: mid, date: cur, type: "present", creneaux: creneaux.map(c => ({ ...c })), debut: "", fin: "", note: "" }); count++; }
@@ -936,10 +1290,16 @@
   /* ---- Modale : horaires par défaut & paramètres ---- */
   function modalParametres() {
     const r = state.reglages;
-    const jourLabels = ["Lun", "Mar", "Mer", "Jeu", "Ven", "Sam", "Dim"];
     const body = `
       <div class="tab-section-label" style="margin-top:0">Affichage</div>
       <label class="chk-line"><input type="checkbox" name="weekend" ${r.afficherWeekend ? "checked" : ""}> Afficher le samedi et le dimanche dans le planning</label>
+
+      <div class="tab-section-label" style="margin-top:18px">Congés payés</div>
+      <div class="field-row">
+        ${fSelect("modeConges", "Calcul des congés acquis", r.modeConges || "mensuel", [{ v: "mensuel", l: "1/12 du droit annuel par mois de présence" }, { v: "fixe", l: "Droit annuel entier dès le début de période" }])}
+        ${fSelect("periodeRefMois", "Période de référence", String(r.periodeRefMois || 1), [{ v: "1", l: "Année civile (1er janvier → 31 décembre)" }, { v: "6", l: "Légale (1er juin → 31 mai)" }])}
+      </div>
+      <p class="field-hint" style="margin:-6px 0 0">Le droit annuel se règle dans la fiche de chaque membre (25 jours ouvrés par défaut).</p>
 
       <div class="tab-section-label" style="margin-top:18px">Créneaux horaires par défaut</div>
       <p class="pc-meta" style="margin:-6px 0 8px">Servent au remplissage ci-dessous et pré-remplissent les nouvelles journées.</p>
@@ -950,18 +1310,20 @@
       <div class="field"><label>Membre</label>
         <select name="cible">
           <option value="__all__">Tous les membres actifs</option>
-          ${state.membres.filter(m => m.actif).map(m => `<option value="${m.id}">${esc(m.prenom)} ${esc(m.nom)}</option>`).join("")}
+          ${membresActifs().map(m => `<option value="${m.id}">${esc(m.prenom)} ${esc(m.nom)}</option>`).join("")}
         </select></div>
       <div class="field-row">${fText("periodeDu", "Du", "", { type: "date" })}${fText("periodeAu", "Au", "", { type: "date" })}</div>
       <label style="display:block;font-size:.85rem;font-weight:600;margin-bottom:6px">Jours concernés</label>
       <div class="jours-chk">
-        ${jourLabels.map((j, idx) => `<label class="chk-inline"><input type="checkbox" class="jour-chk" value="${idx}" ${idx < 5 ? "checked" : ""}> ${j}</label>`).join("")}
+        ${JOURS.map((j, idx) => `<label class="chk-inline"><input type="checkbox" class="jour-chk" value="${idx}" ${idx < 5 ? "checked" : ""}> ${j}</label>`).join("")}
       </div>
       <label class="chk-line" style="margin-top:10px"><input type="checkbox" name="overwrite"> Remplacer les journées déjà renseignées</label>
       <button type="button" class="btn btn-primary" id="apply-periode" style="width:100%;justify-content:center;margin-top:12px">📅 Appliquer les horaires sur la période</button>
     `;
     const ov = openModal("Horaires par défaut & paramètres", body, (ov) => {
       state.reglages.afficherWeekend = ov.querySelector("[name=weekend]").checked;
+      state.reglages.modeConges = val(ov, "modeConges") || "mensuel";
+      state.reglages.periodeRefMois = Number(val(ov, "periodeRefMois")) || 1;
       const def = getDef(); if (def.length) state.reglages.creneauxDefaut = def;
       save(); render();
     }, "Enregistrer les paramètres");
@@ -979,7 +1341,7 @@
       state.reglages.afficherWeekend = ov.querySelector("[name=weekend]").checked;
       state.reglages.creneauxDefaut = creneaux;
       const cible = ov.querySelector("[name=cible]").value;
-      const ids = cible === "__all__" ? state.membres.filter(m => m.actif).map(m => m.id) : [cible];
+      const ids = cible === "__all__" ? membresActifs().map(m => m.id) : [cible];
       const n = appliquerHoraires(ids, du, au, jours, creneaux, ov.querySelector("[name=overwrite]").checked);
       save(); modalRoot.innerHTML = ""; view.tab = "planning"; render();
       toast(n + " créneau" + (n > 1 ? "x" : "") + " de journée appliqué" + (n > 1 ? "s" : "") + ".");
@@ -1008,7 +1370,6 @@
       <button type="button" class="btn btn-primary" id="add-fermeture" style="width:100%;justify-content:center;margin-top:4px">🔒 Ajouter la fermeture</button>
     `;
     const ov = openModal("Fermetures du cabinet", body, () => {}, "Fermer");
-    // masque le bouton "Annuler" (la modale est un gestionnaire, pas un formulaire unique)
     const cancel = ov.querySelector("[data-cancel]"); if (cancel) cancel.style.display = "none";
 
     ov.querySelector("#add-fermeture").onclick = () => {
@@ -1023,19 +1384,16 @@
   }
   function fermetureJoursOuvres(f) {
     let n = 0, cur = f.du, guard = 0;
-    while (cur <= f.au && guard++ < 800) {
-      const wd = new Date(cur + "T00:00:00").getDay();
-      if (wd !== 0 && wd !== 6 && !ferieNom(cur)) n++;
-      cur = isoAdd(cur, 1);
-    }
+    while (cur <= f.au && guard++ < 800) { if (isOuvre(cur)) n++; cur = isoAdd(cur, 1); }
     return n;
   }
 
   function modalDemande() {
-    const opts = state.membres.filter(m => m.actif).map(m => ({ v: m.id, l: m.prenom + " " + m.nom }));
+    const mgr = isManager();
+    const opts = (mgr ? membresActifs() : [sessionUser]).map(m => ({ v: m.id, l: m.prenom + " " + m.nom }));
     const today = iso(new Date());
     const body = `
-      ${fSelect("membreId", "Membre", opts[0] && opts[0].v, opts)}
+      ${fSelect("membreId", "Membre", sessionUser.id, opts)}
       ${fSelect("type", "Type", "Congé payé", ABSENCE_TYPES)}
       <div class="field-row">${fText("dateDebut", "Du", today, { type: "date" })}${fText("dateFin", "Au", today, { type: "date" })}</div>
       ${fText("motif", "Motif (optionnel)", "")}
@@ -1053,23 +1411,22 @@
   function traiterDemande(id, statut) {
     const d = state.demandes.find(x => x.id === id); if (!d) return;
     d.statut = statut;
-    if (statut === "valide" && /Cong|RTT|Absence|Maladie|Formation/.test(d.type)) {
-      // reporte sur le planning
-      const typeMap = { "Congé payé": "conge", "RTT": "conge", "Absence": "absence", "Maladie": "maladie", "Formation": "formation" };
+    if (statut === "valide") {
+      // reporte sur le planning partagé
+      const typeMap = { "Congé payé": "conge", "RTT": "conge", "Congé sans solde": "conge_ss", "Absence": "absence", "Maladie": "maladie", "Formation": "formation" };
       const pt = typeMap[d.type] || "absence";
       let cur = d.dateDebut, guard = 0;
       while (cur <= d.dateFin && guard++ < 400) {
-        const wd = new Date(cur + "T00:00:00").getDay();
-        if (wd !== 0 && wd !== 6) {
+        if (!isWeekend(cur)) {
           const ex = state.planning.find(p => p.membreId === d.membreId && p.date === cur);
-          if (ex) { ex.type = pt; ex.debut = ""; ex.fin = ""; ex.creneaux = []; }
+          if (ex) { ex.type = pt; ex.debut = ""; ex.fin = ""; ex.creneaux = []; ex.note = d.type; }
           else state.planning.push({ id: uid(), membreId: d.membreId, date: cur, type: pt, debut: "", fin: "", creneaux: [], note: d.type });
         }
         cur = isoAdd(cur, 1);
       }
     }
     save(); render();
-    toast(statut === "valide" ? "Demande validée." : "Demande refusée.");
+    toast(statut === "valide" ? "Demande validée et reportée sur le planning." : "Demande refusée.");
   }
 
   /* =========================================================
@@ -1077,30 +1434,38 @@
      ========================================================= */
   document.addEventListener("click", (e) => {
     if (!e.target.closest("#app-personnel") && !e.target.closest("#modal-root")) return;
-    const t = e.target.closest("[data-ptab],[data-pact],[data-pcell],[data-pferie],[data-pferm],[data-pbadge],[data-edit-membre],[data-del-membre],[data-compte-membre],[data-del-fermeture],[data-valide],[data-refuse],[data-del-demande]");
+    const t = e.target.closest("[data-ptab],[data-pact],[data-pcell],[data-scell],[data-pferie],[data-pferm],[data-edit-membre],[data-del-membre],[data-compte-membre],[data-del-fermeture],[data-valide],[data-refuse],[data-del-demande]");
     if (!t) return;
 
     if (t.dataset.ptab) { view.tab = t.dataset.ptab; return render(); }
     if (t.dataset.pferie) { toast("Jour férié (" + t.dataset.pferie + ") — cabinet fermé."); return; }
     if (t.dataset.pferm) { toast("Fermeture du cabinet : " + t.dataset.pferm + "."); return; }
     if (t.dataset.pcell) { const [mid, date] = t.dataset.pcell.split("|"); return modalCell(mid, date); }
-    if (t.dataset.pbadge) { const m = membre(t.dataset.pbadge); if (m) pointer(m); return; }
-    if (t.dataset.editMembre) return modalMembre(membre(t.dataset.editMembre));
+    if (t.dataset.scell) { const [mid, date] = t.dataset.scell.split("|"); return modalSuivi(mid, date); }
+    if (t.dataset.editMembre) {
+      const m = membre(t.dataset.editMembre);
+      if (!isManager() && (!sessionUser || sessionUser.id !== m.id)) { toast("Réservé à l'employeur."); return; }
+      return modalMembre(m);
+    }
     if (t.dataset.compteMembre) return modalCompte(membre(t.dataset.compteMembre));
-    if (t.dataset.delMembre) { if (confirm("Supprimer ce membre ? Son historique de pointages restera mais ne sera plus associé.")) { state.membres = state.membres.filter(x => x.id !== t.dataset.delMembre); save(); renderTab(); } return; }
+    if (t.dataset.delMembre) {
+      if (!isManager()) { toast("Réservé à l'employeur."); return; }
+      if (confirm("Supprimer ce membre ? Son historique (planning, suivi) restera mais ne sera plus associé.")) { state.membres = state.membres.filter(x => x.id !== t.dataset.delMembre); save(); renderTab(); }
+      return;
+    }
     if (t.dataset.delFermeture) { if (confirm("Supprimer cette fermeture ?")) { state.fermetures = state.fermetures.filter(x => x.id !== t.dataset.delFermeture); save(); render(); modalFermetures(); } return; }
     if (t.dataset.valide) {
-      if (!sessionUser || !sessionUser.isManager) { toast("Seul l'employeur peut valider une demande."); return; }
+      if (!isManager()) { toast("Seul l'employeur peut valider une demande."); return; }
       return traiterDemande(t.dataset.valide, "valide");
     }
     if (t.dataset.refuse) {
-      if (!sessionUser || !sessionUser.isManager) { toast("Seul l'employeur peut refuser une demande."); return; }
+      if (!isManager()) { toast("Seul l'employeur peut refuser une demande."); return; }
       return traiterDemande(t.dataset.refuse, "refuse");
     }
     if (t.dataset.delDemande) {
       const d = state.demandes.find(x => x.id === t.dataset.delDemande);
       if (!d || !sessionUser) return;
-      if (!sessionUser.isManager && (d.membreId !== sessionUser.id || d.statut !== "en_attente")) {
+      if (!isManager() && (d.membreId !== sessionUser.id || d.statut !== "en_attente")) {
         toast("Vous ne pouvez annuler que vos propres demandes en attente."); return;
       }
       if (confirm("Supprimer cette demande ?")) { state.demandes = state.demandes.filter(x => x.id !== t.dataset.delDemande); save(); render(); }
@@ -1111,22 +1476,44 @@
       case "week-prev": view.weekStart = isoAdd(view.weekStart, -7); return renderTab();
       case "week-next": view.weekStart = isoAdd(view.weekStart, 7); return renderTab();
       case "week-today": view.weekStart = mondayOf(new Date()); return renderTab();
-      case "month-prev": view.monthRef = shiftMonth(view.monthRef, -1); return renderTab();
-      case "month-next": view.monthRef = shiftMonth(view.monthRef, 1); return renderTab();
-      case "logout": sessionUser = null; render(); return;
+      case "month-prev": view.monthRef = shiftMonth(view.monthRef, -1); view.resumeDu = view.resumeAu = ""; return renderTab();
+      case "month-next": view.monthRef = shiftMonth(view.monthRef, 1); view.resumeDu = view.resumeAu = ""; return renderTab();
+      case "month-today": view.monthRef = ymOf(new Date()); view.resumeDu = view.resumeAu = ""; return renderTab();
+      case "logout": sessionUser = null; view.tab = "dashboard"; render(); return;
       case "print-planning": window.print(); return;
       case "params-planning": return modalParametres();
       case "fermetures": return modalFermetures();
-      case "export-paie": return exportPaie();
-      case "add-membre": return modalMembre(null);
+      case "add-membre": if (!isManager()) { toast("Réservé à l'employeur."); return; } return modalMembre(null);
       case "add-demande": return modalDemande();
-      case "goto-badgeuse": view.tab = "badgeuse"; return render();
+      case "goto-suivi": view.tab = "suivi"; return render();
+      case "goto-resume": view.tab = "resume"; return render();
+      case "suivi-add": return modalSuivi(null, null);
+      case "resume-copy": return resumeCopy();
+      case "resume-print": window.print(); return;
+      case "resume-dl": return resumeDownload();
+      case "resume-mail": return resumeMail();
+      case "resume-reset": view.resumeDu = view.resumeAu = ""; return renderTab();
+      case "bilan-prev": view.bilanOffset--; return renderTab();
+      case "bilan-next": view.bilanOffset++; return renderTab();
+      case "bilan-today": view.bilanOffset = 0; return renderTab();
+      case "bilan-copy": return bilanCopy();
+      case "bilan-print": window.print(); return;
+      case "goto-bilan": view.tab = "bilan"; return render();
     }
   });
-  function shiftMonth(ym, delta) { const [y, m] = ym.split("-").map(Number); const d = new Date(y, m - 1 + delta, 1); return ymOf(d); }
+  // Filtres du résumé (personne / période personnalisée)
+  document.addEventListener("change", (e) => {
+    if (!e.target.closest("#app-personnel")) return;
+    if (e.target.id === "rs-membre") { view.resumeMembre = e.target.value; return renderTab(); }
+    if (e.target.id === "rs-du" || e.target.id === "rs-au") {
+      const du = document.getElementById("rs-du").value, au = document.getElementById("rs-au").value;
+      view.resumeDu = du; view.resumeAu = au;
+      if (du && au) { if (au < du) { toast("La date de fin précède le début."); return; } renderTab(); }
+    }
+  });
 
   /* =========================================================
-     ENREGISTREMENT DANS LE SHELL
+     ENREGISTREMENT DANS LE SHELL (sauvegarde / restauration)
      ========================================================= */
   if (window.CybeleShell) {
     window.CybeleShell.register("personnel", {
@@ -1138,18 +1525,30 @@
       },
       onShow: () => render(),
     });
+    window.CybeleShell.register("personnel-prive", {
+      label: "Suivi privé",
+      getState: () => prive,
+      setState: (p) => {
+        if (!p || !Array.isArray(p.suivi)) return false;
+        prive = migratePrive(p); savePrive(); if (view.tab === "suivi" || view.tab === "resume") renderTab(); return true;
+      },
+    });
   }
 
-  // Chargement initial depuis Firestore puis rendu
+  /* =========================================================
+     CHARGEMENT INITIAL (Firestore → local → exemple)
+     ========================================================= */
+  async function loadCloud(key, ms) {
+    return Promise.race([
+      window.CybeleDB.load(key),
+      new Promise((_, rej) => setTimeout(() => rej(new Error("timeout")), ms || 6000))
+    ]);
+  }
   async function initPersonnel() {
-    // Attendre la connexion (sécurité) avant tout accès aux données cloud
     if (window.CybeleAuth) { try { await window.CybeleAuth.whenReady(); } catch (e) {} }
     if (window.CybeleDB) {
       try {
-        const cloud = await Promise.race([
-          window.CybeleDB.load("personnel"),
-          new Promise((_, rej) => setTimeout(() => rej(new Error("timeout")), 6000))
-        ]);
+        const cloud = await loadCloud("personnel");
         if (cloud) {
           state = migrate(cloud);
           try { localStorage.setItem(STORE_KEY, JSON.stringify(state)); } catch (e) {}
@@ -1157,11 +1556,16 @@
           state = loadLocal() || seed();
           if (!loadLocal()) save();
         }
-      } catch (e) {
-        state = loadLocal() || seed();
-      }
+      } catch (e) { state = loadLocal() || seed(); }
+      try {
+        const cp = await loadCloud("personnel-prive");
+        prive = cp ? migratePrive(cp) : (loadPriveLocal() || migratePrive({}));
+        if (cp) { try { localStorage.setItem(PRIVE_KEY, JSON.stringify(prive)); } catch (e) {} }
+      } catch (e) { prive = loadPriveLocal() || migratePrive({}); }
     } else {
-      state = loadLocal() || seed();
+      state = loadLocal();
+      if (!state) { state = seed(); save(); }
+      prive = loadPriveLocal() || migratePrive({});
     }
     autoSelectSession();
     if (document.body.dataset.module === "personnel") render();
