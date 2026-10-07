@@ -240,7 +240,7 @@ Réservez votre consultation en ligne, c'est simple et rapide. Une question ? Ap
 
 URL : https://www.cybele-dent.fr/actes.html
 
-# Nos soins dentaires à Vienne
+### Nos soins dentaires à Vienne
 
 Une prise en charge complète de votre santé bucco-dentaire, réalisée au cabinet : prévention, caries, gencives, implants, prothèses, enfants, esthétique, bruxisme et apnée du sommeil, urgences.
 
@@ -406,7 +406,7 @@ Prenez rendez-vous en ligne ou contactez-nous pour toute question sur votre trai
 
 URL : https://www.cybele-dent.fr/prevention-dentaire-vienne.html
 
-# Bilan bucco-dentaire (BBD) et prévention dentaire à Vienne
+### Bilan bucco-dentaire (BBD) et prévention dentaire à Vienne
 
 Bilan bucco-dentaire complet, examen M'T dents pris en charge à 100 %, détartrage et conseils personnalisés pour garder des dents saines toute la vie.
 
@@ -528,7 +528,7 @@ Prenez rendez-vous en ligne ou contactez-nous pour toute question sur votre trai
 
 URL : https://www.cybele-dent.fr/soins-dentaires-carie-vienne.html
 
-# Soins dentaires et traitement des caries à Vienne
+### Soins dentaires et traitement des caries à Vienne
 
 Traiter les caries et restaurer vos dents en préservant un maximum de tissu naturel.
 
@@ -638,7 +638,7 @@ Prenez rendez-vous en ligne ou contactez-nous pour toute question sur votre trai
 
 URL : https://www.cybele-dent.fr/parodontologie-vienne.html
 
-# Parodontologie à Vienne : le soin de vos gencives
+### Parodontologie à Vienne : le soin de vos gencives
 
 Prévenir et traiter le saignement des gencives et le déchaussement des dents.
 
@@ -750,7 +750,7 @@ Prenez rendez-vous en ligne ou contactez-nous pour toute question sur votre trai
 
 URL : https://www.cybele-dent.fr/endodontie-vienne.html
 
-# Endodontie à Vienne : dévitalisation et traitement des racines
+### Endodontie à Vienne : dévitalisation et traitement des racines
 
 Conserver une dent infectée ou douloureuse plutôt que de l'extraire.
 
@@ -862,7 +862,7 @@ Prenez rendez-vous en ligne ou contactez-nous pour toute question sur votre trai
 
 URL : https://www.cybele-dent.fr/prothese-dentaire-vienne.html
 
-# Prothèses dentaires à Vienne : couronnes, bridges et appareils
+### Prothèses dentaires à Vienne : couronnes, bridges et appareils
 
 Remplacer ou recouvrir les dents abîmées ou manquantes, pour retrouver confort et sourire.
 
@@ -970,7 +970,7 @@ Prenez rendez-vous en ligne ou contactez-nous pour toute question sur votre trai
 
 URL : https://www.cybele-dent.fr/implant-dentaire-vienne.html
 
-# Implant dentaire à Vienne
+### Implant dentaire à Vienne
 
 Remplacer durablement une ou plusieurs dents manquantes, au plus proche de la dent naturelle.
 
@@ -1090,7 +1090,7 @@ Prenez rendez-vous en ligne ou contactez-nous pour toute question sur votre trai
 
 URL : https://www.cybele-dent.fr/pedodontie-dentiste-enfant-vienne.html
 
-# Dentiste pour enfants à Vienne : pédodontie et dentisterie pédiatrique
+### Dentiste pour enfants à Vienne : pédodontie et dentisterie pédiatrique
 
 Des soins dentaires adaptés aux enfants de 3 à 16 ans, en douceur, pour instaurer dès le plus jeune âge une relation de confiance avec le dentiste.
 
@@ -1211,7 +1211,7 @@ Prenez rendez-vous en ligne ou contactez-nous pour toute question sur votre trai
 
 URL : https://www.cybele-dent.fr/eclaircissement-dentaire-vienne.html
 
-# Éclaircissement dentaire (blanchiment) à Vienne
+### Éclaircissement dentaire (blanchiment) à Vienne
 
 Un sourire plus lumineux, en toute sécurité et sous le contrôle du praticien.
 
@@ -1317,7 +1317,7 @@ Prenez rendez-vous en ligne ou contactez-nous pour toute question sur votre trai
 
 URL : https://www.cybele-dent.fr/urgence-dentaire-vienne.html
 
-# Urgence dentaire à Vienne
+### Urgence dentaire à Vienne
 
 Une douleur, un abcès, une dent cassée ? Appelez-nous : nous faisons le maximum pour vous recevoir rapidement.
 
@@ -1435,7 +1435,7 @@ Prenez rendez-vous en ligne ou contactez-nous pour toute question sur votre trai
 
 URL : https://www.cybele-dent.fr/gouttiere-bruxisme-apnee-sommeil-vienne.html
 
-# Gouttière de bruxisme et orthèse d'apnée du sommeil à Vienne
+### Gouttière de bruxisme et orthèse d'apnée du sommeil à Vienne
 
 Protéger vos dents du grincement nocturne et traiter le ronflement et l'apnée du sommeil avec une orthèse d'avancée mandibulaire sur mesure.
 
@@ -1547,7 +1547,7 @@ Prenez rendez-vous en ligne ou contactez-nous pour toute question sur votre trai
 
 URL : https://www.cybele-dent.fr/tarifs-remboursement-dentiste-vienne.html
 
-# Tarifs et remboursements
+### Tarifs et remboursements
 
 Cabinet conventionné avec l'Assurance Maladie, carte Vitale, devis détaillé avant tout traitement : tout ce qu'il faut savoir avant votre rendez-vous.
 
@@ -1673,7 +1673,7 @@ Prenez rendez-vous pour un bilan : nous vous expliquons les options et leur pris
 
 URL : https://www.cybele-dent.fr/equipe.html
 
-# L'équipe du cabinet
+### L'équipe du cabinet
 
 Des professionnels passionnés et attentifs, réunis pour prendre soin de votre sourire.
 
@@ -1741,7 +1741,7 @@ Prenez rendez-vous pour une première consultation et rencontrez notre équipe.
 
 URL : https://www.cybele-dent.fr/dr-celine-filipputti-dentiste-vienne.html
 
-# Dr Céline Filipputti, chirurgien-dentiste à Vienne
+### Dr Céline Filipputti, chirurgien-dentiste à Vienne
 
 Fondatrice du cabinet Cybèle Dent, diplômée de la Faculté d'odontologie de Lyon.
 
@@ -1817,7 +1817,7 @@ Réservez votre consultation en ligne ou appelez-nous directement.
 
 URL : https://www.cybele-dent.fr/dr-laura-agosto-dentiste-vienne.html
 
-# Dr Laura Agosto, chirurgien-dentiste à Vienne
+### Dr Laura Agosto, chirurgien-dentiste à Vienne
 
 Chirurgien-dentiste au cabinet Cybèle Dent, diplômée de la Faculté d'odontologie de Lyon.
 
@@ -1893,7 +1893,7 @@ Réservez votre consultation en ligne ou appelez-nous directement.
 
 URL : https://www.cybele-dent.fr/clotilde-peaut-pedodontie-vienne.html
 
-# Clotilde Péaut, soins dentaires des enfants à Vienne
+### Clotilde Péaut, soins dentaires des enfants à Vienne
 
 Dédiée à la pédodontie au cabinet Cybèle Dent : les enfants de 3 à 16 ans, les pathologies rares et la MIH.
 
@@ -1963,7 +1963,7 @@ Réservez votre consultation en ligne ou appelez-nous directement.
 
 URL : https://www.cybele-dent.fr/salles.html
 
-# Le cabinet en images
+### Le cabinet en images
 
 Un environnement lumineux, moderne et apaisant, équipé d'un plateau technique complet.
 
@@ -2027,7 +2027,7 @@ Nous trouver (https://www.cybele-dent.fr/contact.html)
 
 URL : https://www.cybele-dent.fr/contact.html
 
-# Nous contacter
+### Nous contacter
 
 Une question, un rendez-vous ? Nous sommes à votre écoute.
 
@@ -2096,7 +2096,7 @@ Réservez votre consultation en ligne ou appelez-nous directement.
 
 URL : https://www.cybele-dent.fr/en/
 
-# English-speaking dentist in Vienne, France
+### English-speaking dentist in Vienne, France
 
 Modern, gentle dental care in the historic centre of Vienne, 20 minutes from Lyon. Adults and children, routine care and emergencies, English spoken.
 
