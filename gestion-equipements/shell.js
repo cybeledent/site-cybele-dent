@@ -16,7 +16,7 @@
       modules[id] = api;
     },
     switchTo(id) {
-      if (!modules[id] && id !== "equipements" && id !== "personnel") return;
+      if (id !== "equipements" && id !== "personnel") return;
       active = id;
       document.body.dataset.module = id;
       document.querySelectorAll(".module-tab").forEach(t =>
@@ -96,7 +96,8 @@
             <p style="margin-bottom:12px">CybèleGestion regroupe les outils de gestion du cabinet :</p>
             <ul style="margin:0 0 12px 18px; color:var(--muted); line-height:1.9">
               <li><strong>🔧 Équipements</strong> : inventaire, maintenance, garanties, documents.</li>
-              <li><strong>👥 Personnel</strong> : planning, badgeuse, congés, heures, export paie.</li>
+              <li><strong>👥 Personnel</strong> : planning de l'équipe, demandes de congés, membres.</li>
+              <li><strong>🔒 Suivi privé</strong> (employeur uniquement) : retards, heures supplémentaires, absences, <strong>résumé comptable</strong> prêt à envoyer et <strong>bilan annuel</strong> (absences, congés payés acquis / pris / solde).</li>
             </ul>
             <p style="background:var(--coral-light);padding:12px;border-radius:10px;font-size:.9rem">
               💾 <strong>Important</strong> : les données sont enregistrées sur <em>cet appareil</em>.
