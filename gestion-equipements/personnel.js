@@ -86,7 +86,16 @@
     // Complète les réglages manquants (rétro-compat)
     if (s.reglages.afficherWeekend === undefined) s.reglages.afficherWeekend = false;
     if (!s.reglages.modeConges) s.reglages.modeConges = "mensuel";       // "mensuel" (1/12 par mois) ou "fixe"
-    if (!s.reglages.periodeRefMois) s.reglages.periodeRefMois = 1;       // mois de début de la période de référence (1 = janvier, 6 = juin)
+    if (!s.reglages.uniteConges) {
+      // Première ouverture avec le décompte en jours ouvrables : on aligne sur les contrats
+      // (30 jours ouvrables, période légale du 1er juin au 31 mai). Les fiches encore au
+      // défaut « 25 jours ouvrés » passent à 30 ; les autres valeurs sont conservées.
+      s.reglages.uniteConges = "ouvrables";   // "ouvrables" (lundi–samedi, 30 j/an) ou "ouvres" (lundi–vendredi, 25 j/an)
+      s.reglages.periodeRefMois = 6;
+      s.reglages.congesAnnuelDefaut = 30;
+      s.membres.forEach(m => { if (Number(m.congesAcquis) === 25) m.congesAcquis = 30; });
+    }
+    if (!s.reglages.periodeRefMois) s.reglages.periodeRefMois = 6;       // mois de début de la période de référence (1 = janvier, 6 = juin)
     if (!Array.isArray(s.reglages.creneauxDefaut) || !s.reglages.creneauxDefaut.length)
       s.reglages.creneauxDefaut = [{ debut: "09:00", fin: "13:00" }, { debut: "14:00", fin: "18:00" }];
     // Si aucun manager défini, auto-détecte par le nom "Filipputti"
@@ -102,7 +111,15 @@
     });
     return s;
   }
-  function defaultReglages() { return { heuresSemaineDefaut: 35, congesAnnuelDefaut: 25, pauseDejeunerMin: 60, afficherWeekend: false, creneauxDefaut: [{ debut: "09:00", fin: "13:00" }, { debut: "14:00", fin: "18:00" }] }; }
+  function defaultReglages() { return { heuresSemaineDefaut: 35, congesAnnuelDefaut: 30, pauseDejeunerMin: 60, afficherWeekend: false, creneauxDefaut: [{ debut: "09:00", fin: "13:00" }, { debut: "14:00", fin: "18:00" }], modeConges: "mensuel", uniteConges: "ouvrables", periodeRefMois: 6 }; }
+  // Unité de décompte des congés payés
+  function enOuvrables() { return (state.reglages.uniteConges || "ouvrables") !== "ouvres"; }
+  function uniteLabel() { return enOuvrables() ? "ouvrables" : "ouvrés"; }
+  function fmtCP(n) { // "6 jours ouvrables", "1 jour ouvrable", "½ journée"
+    if (n < 1) return fmtJours(n);
+    const u = uniteLabel();
+    return fmtJours(n) + " " + (n > 1 ? u : (u === "ouvrables" ? "ouvrable" : "ouvré"));
+  }
   function save() {
     try { localStorage.setItem(STORE_KEY, JSON.stringify(state)); }
     catch (e) { toast("⚠ Mémoire pleine."); }
@@ -143,7 +160,7 @@
     const mon = mondayOf(new Date());
     const dd = (i) => isoAdd(mon, i);
     const mk = (id, prenom, nom, role, binomeId, couleur, pin, h) =>
-      ({ id, prenom, nom, role, binomeId, couleur, pin, heuresSemaine: h, congesAcquis: 25, actif: true, salarie: role !== "Praticien" });
+      ({ id, prenom, nom, role, binomeId, couleur, pin, heuresSemaine: h, congesAcquis: 30, actif: true, salarie: role !== "Praticien" });
 
     const membres = [
       { ...mk(m1, "Céline", "Filipputti", "Praticien", m3, COLORS[0], "1111", 39), isManager: true },
@@ -171,7 +188,7 @@
     const yr = new Date().getFullYear();
     const fermetures = [{ id: uid(), nom: "Fermeture estivale", du: yr + "-08-03", au: yr + "-08-14" }];
 
-    return { membres, planning, demandes, fermetures, reglages: defaultReglages() };
+    return migrate({ membres, planning, demandes, fermetures, reglages: defaultReglages() });
   }
 
   /* =========================================================
@@ -311,10 +328,27 @@
     const detail = mo === 1 ? "année civile " + y : "du 1er " + MOIS[mo - 1] + " " + y + " au " + fmtLong(to);
     return { from, to, label, detail, annee: y };
   }
-  // Congés payés pris (jours ouvrés, demi-journées comprises) sur une période :
+  // Congés payés pris sur une période (dans l'unité choisie, demi-journées comprises) :
   // suivi privé + congés validés du planning + fermetures du cabinet, sans doublon
   function congesPrisPeriode(m, from, to) {
-    return absencesPour(m, from, to).runs.filter(r => /^Congé payé/.test(r.label)).reduce((s, r) => s + r.jours, 0);
+    return absencesPour(m, from, to).runs.filter(r => /^Congé payé/.test(r.label)).reduce((s, r) => s + r.cout, 0);
+  }
+  // Jour ouvrable : ni dimanche, ni férié (le samedi compte)
+  function isOuvrable(isoStr) { return weekdayOf(isoStr) !== 6 && !ferieNom(isoStr); }
+  // Jour où la personne aurait travaillé : jour ouvré du cabinet, non marqué « Repos » dans son planning
+  function jourTravaille(m, isoStr) {
+    if (!isOuvre(isoStr)) return false;
+    const p = state.planning.find(x => x.membreId === m.id && x.date === isoStr);
+    return !(p && p.type === "repos");
+  }
+  // Coût d'un épisode de congé payé en jours ouvrables : du premier jour d'absence
+  // jusqu'au dernier jour ouvrable précédant la reprise (règle légale, samedi compris)
+  function coutOuvrables(m, from, to) {
+    let reprise = isoAdd(to, 1), guard = 0;
+    while (!jourTravaille(m, reprise) && guard++ < 31) reprise = isoAdd(reprise, 1);
+    let n = 0;
+    for (let d = from; d < reprise; d = isoAdd(d, 1)) if (isOuvrable(d)) n++;
+    return n;
   }
   // Acquisition : 1/12 du droit annuel par mois complet de présence depuis le début
   // de la période (ou la date d'entrée), jusqu'à `asOf` ; mode "fixe" = droit annuel entier
@@ -547,12 +581,12 @@
     return `
       <div class="tab-section-label" style="margin-top:22px">Mes congés payés — période ${esc(cp.per.label)}</div>
       <div class="cp-card">
-        <div class="cp-stat"><div class="cp-n">${fmtNum(cp.acq.total)} j</div><div class="cp-l">acquis à ce jour${a.report ? `<br><span>dont ${fmtNum(a.report)} j de report</span>` : ""}</div></div>
+        <div class="cp-stat"><div class="cp-n">${fmtNum(cp.acq.total)} j</div><div class="cp-l">acquis à ce jour (jours ${uniteLabel()})${a.report ? `<br><span>dont ${fmtNum(a.report)} j de report</span>` : ""}</div></div>
         <div class="cp-stat"><div class="cp-n">${fmtNum(cp.pris)} j</div><div class="cp-l">pris sur la période</div></div>
         <div class="cp-stat cp-solde"><div class="cp-n">${fmtNum(cp.solde)} j</div><div class="cp-l">solde disponible</div></div>
         <div class="cp-stat"><div class="cp-n">${fmtNum(cp.soldeFin)} j</div><div class="cp-l">solde prévu au ${fmtDate(cp.per.to)}</div></div>
       </div>
-      <p class="pc-meta" style="margin-top:8px">${a.mode === "fixe" ? `Droit annuel de ${fmtNum(m.congesAcquis || 0)} jours ouvrés.` : `${fmtNum(m.congesAcquis || 0)} jours ouvrés par an, soit ${String(Math.round(a.taux * 100) / 100).replace(".", ",")} j acquis par mois complet de présence${depuis}.`} Les congés pris comprennent les congés validés, les fermetures du cabinet et les jours notés par l'employeur.</p>
+      <p class="pc-meta" style="margin-top:8px">${a.mode === "fixe" ? `Droit annuel de ${fmtNum(m.congesAcquis || 0)} jours ${uniteLabel()}.` : `${fmtNum(m.congesAcquis || 0)} jours ${uniteLabel()} par an, soit ${String(Math.round(a.taux * 100) / 100).replace(".", ",")} j acquis par mois complet de présence${depuis}.`} ${enOuvrables() ? "Chaque congé est décompté du premier jour d'absence jusqu'au dernier jour ouvrable avant la reprise, samedi compris (une semaine = 6 jours)." : "Seuls les jours du lundi au vendredi sont décomptés (une semaine = 5 jours)."} Les congés pris comprennent les congés validés, les fermetures du cabinet et les jours notés par l'employeur.</p>
     `;
   }
 
@@ -579,7 +613,7 @@
       out.push("  Absences : " + bilanAbsTexte(b.st));
       out.push("  Retards : " + (b.st.nbRetards ? b.st.nbRetards + " (" + fmtDuree(b.st.retardMin) + " au total)" : "aucun"));
       out.push("  Heures supplémentaires : " + (b.st.supMin ? fmtDuree(b.st.supMin) : "aucune"));
-      if (b.m.salarie) out.push("  Congés payés : acquis " + fmtNum(b.acq.total) + " j" + (b.acq.report ? " (dont report " + fmtNum(b.acq.report) + " j)" : "") + " · pris " + fmtNum(b.pris) + " j · solde " + fmtNum(b.solde) + " j");
+      if (b.m.salarie) out.push("  Congés payés (jours " + uniteLabel() + ") : acquis " + fmtNum(b.acq.total) + " j" + (b.acq.report ? " (dont report " + fmtNum(b.acq.report) + " j)" : "") + " · pris " + fmtNum(b.pris) + " j · solde " + fmtNum(b.solde) + " j");
       out.push("");
     });
     out.push("Équipe : " + fmtJours(equipe.jours) + " d'absence (" + equipe.episodes + " épisode" + (equipe.episodes > 1 ? "s" : "") + ") · " + equipe.retards + " retard" + (equipe.retards > 1 ? "s" : "") + " (" + fmtDuree(equipe.retardMin) + ") · " + fmtDuree(equipe.supMin) + " d'heures supplémentaires");
@@ -588,7 +622,7 @@
   function bilanAbsTexte(st) {
     if (!st.episodes) return "aucune";
     const parts = Object.keys(st.parType).sort((a, b) => st.parType[b].jours - st.parType[a].jours)
-      .map(k => lc1(k) + " " + fmtJours(st.parType[k].jours) + " (" + st.parType[k].episodes + " fois)");
+      .map(k => lc1(k) + " " + (/^Congé payé/.test(k) ? fmtCP(st.parType[k].cout) : fmtJours(st.parType[k].jours)) + " (" + st.parType[k].episodes + " fois)");
     return fmtJours(st.joursAbs) + " en " + st.episodes + " épisode" + (st.episodes > 1 ? "s" : "") + " — " + parts.join(" · ");
   }
   function viewBilan() {
@@ -617,10 +651,10 @@
           <div class="rs-nom">${avatar(x.m, 26)} ${esc(x.nom)} <span class="pc-meta">· ${esc(x.m.role)}</span></div>
           <div class="bl-grid">
             <div class="bl-item"><div class="bl-k">Absences</div><div class="bl-v">${x.st.episodes ? `<strong>${fmtJours(x.st.joursAbs)}</strong> en ${x.st.episodes} épisode${x.st.episodes > 1 ? "s" : ""}` : "aucune"}</div>
-              ${x.st.episodes ? `<ul class="bl-types">${Object.keys(x.st.parType).sort((p, q) => x.st.parType[q].jours - x.st.parType[p].jours).map(k => `<li>${absIco(k)} ${esc(k)} : <strong>${fmtJours(x.st.parType[k].jours)}</strong> <span class="pc-meta">(${x.st.parType[k].episodes} fois)</span></li>`).join("")}</ul>` : ""}</div>
+              ${x.st.episodes ? `<ul class="bl-types">${Object.keys(x.st.parType).sort((p, q) => x.st.parType[q].jours - x.st.parType[p].jours).map(k => `<li>${absIco(k)} ${esc(k)} : <strong>${/^Congé payé/.test(k) ? fmtCP(x.st.parType[k].cout) : fmtJours(x.st.parType[k].jours)}</strong> <span class="pc-meta">(${x.st.parType[k].episodes} fois)</span></li>`).join("")}</ul>` : ""}</div>
             <div class="bl-item"><div class="bl-k">Retards</div><div class="bl-v">${x.st.nbRetards ? `<strong>${x.st.nbRetards}</strong> · ${fmtDuree(x.st.retardMin)} au total` : "aucun"}</div></div>
             <div class="bl-item"><div class="bl-k">Heures sup.</div><div class="bl-v">${x.st.supMin ? `<strong>${fmtDuree(x.st.supMin)}</strong>` : "aucune"}</div></div>
-            ${x.m.salarie ? `<div class="bl-item"><div class="bl-k">Congés payés</div><div class="bl-v">acquis <strong>${fmtNum(x.acq.total)} j</strong>${x.acq.report ? ` <span class="pc-meta">(dont report ${fmtNum(x.acq.report)})</span>` : ""} · pris <strong>${fmtNum(x.pris)} j</strong> · solde <strong class="${x.solde < 0 ? "t-neg" : ""}">${fmtNum(x.solde)} j</strong></div></div>` : ""}
+            ${x.m.salarie ? `<div class="bl-item"><div class="bl-k">Congés payés (jours ${uniteLabel()})</div><div class="bl-v">acquis <strong>${fmtNum(x.acq.total)} j</strong>${x.acq.report ? ` <span class="pc-meta">(dont report ${fmtNum(x.acq.report)})</span>` : ""} · pris <strong>${fmtNum(x.pris)} j</strong> · solde <strong class="${x.solde < 0 ? "t-neg" : ""}">${fmtNum(x.solde)} j</strong></div></div>` : ""}
           </div>
         </div>`).join("")}
       </div>
@@ -886,8 +920,13 @@
       if (last && last.label === e.label && !last.demi && !e.demi && joursConsecutifs(last.to, e.date)) { last.to = e.date; last.jours += 1; }
       else runs.push({ kind: "abs", label: e.label, from: e.date, to: e.date, jours: e.demi ? 0.5 : 1, demi: e.demi, note: e.note, date: e.date });
     });
+    // Coût de chaque épisode de congé payé dans l'unité choisie (les autres absences restent en jours d'absence)
+    runs.forEach(r => {
+      r.cp = /^Congé payé/.test(r.label);
+      r.cout = (r.cp && enOuvrables() && !r.demi) ? coutOuvrables(m, r.from, r.to) : r.jours;
+    });
     const parType = {};
-    runs.forEach(r => { const k = r.label.replace(/ \(fermeture du cabinet\)$/, ""); const t = parType[k] || (parType[k] = { jours: 0, episodes: 0 }); t.jours += r.jours; t.episodes++; });
+    runs.forEach(r => { const k = r.label.replace(/ \(fermeture du cabinet\)$/, ""); const t = parType[k] || (parType[k] = { jours: 0, cout: 0, episodes: 0 }); t.jours += r.jours; t.cout += r.cout; t.episodes++; });
     const retards = ev.filter(e => e.kind === "retard");
     return {
       ev, runs, parType,
@@ -904,16 +943,19 @@
       if (it.kind === "abs") {
         const lab = lc1(it.label);
         if (it.demi) return `${lab} le ${fmtLong(it.from)} (${DUREES[it.demi]})${note}`;
-        return it.from === it.to ? `${lab} le ${fmtLong(it.from)}${note}` : `${lab} ${fmtPeriode(it.from, it.to)} (${fmtJours(it.jours)})${note}`;
+        // Congé payé : on indique les jours décomptés dans l'unité des contrats (ex. « 6 jours ouvrables »)
+        const cpInfo = it.cp ? ` (${fmtCP(it.cout)}${it.cout !== it.jours ? " décomptés" : ""})` : "";
+        if (it.from === it.to) return `${lab} le ${fmtLong(it.from)}${it.cp && it.cout !== it.jours ? cpInfo : ""}${note}`;
+        return `${lab} ${fmtPeriode(it.from, it.to)}${it.cp ? cpInfo : ` (${fmtJours(it.jours)})`}${note}`;
       }
       if (it.kind === "retard") return `retard de ${fmtDuree(it.min)} le ${fmtLong(it.date)}${note}`;
       return `${fmtDuree(it.min)} d'heures supplémentaires le ${fmtLong(it.date)}${note}`;
     });
     // Totaux
     const totAbs = {};
-    runs.forEach(r => { totAbs[r.label] = (totAbs[r.label] || 0) + r.jours; });
+    runs.forEach(r => { totAbs[r.label] = (totAbs[r.label] || 0) + r.cout; });
     const retards = ev.filter(e => e.kind === "retard"), sup = ev.filter(e => e.kind === "sup").reduce((t, e) => t + e.min, 0);
-    const tot = Object.keys(totAbs).map(k => lc1(k) + " : " + fmtJours(totAbs[k]));
+    const tot = Object.keys(totAbs).map(k => lc1(k) + " : " + (/^Congé payé/.test(k) ? fmtCP(totAbs[k]) : fmtJours(totAbs[k])));
     if (retards.length) tot.push(retards.length + " retard" + (retards.length > 1 ? "s" : "") + " (" + fmtDuree(retards.reduce((t, e) => t + e.min, 0)) + " au total)");
     if (sup) tot.push(fmtDuree(sup) + " d'heures supplémentaires");
     return { lines, total: tot };
@@ -1092,9 +1134,9 @@
       <div class="field-row">${fText("prenom", "Prénom *", m.prenom)}${fText("nom", "Nom *", m.nom)}</div>
       <div class="field-row">${fSelect("role", "Rôle", m.role, ROLES)}
         ${fSelect("binomeId", "Binôme", m.binomeId, [{ v: "", l: "— Aucun —" }].concat(others.map(o => ({ v: o.id, l: o.prenom + " " + o.nom }))))}</div>
-      <div class="field-row">${fText("heuresSemaine", "Heures / semaine", m.heuresSemaine, { type: "number" })}${fText("congesAcquis", "Congés payés par an (jours ouvrés)", m.congesAcquis, { type: "number", attrs: ' step="0.5"' })}</div>
+      <div class="field-row">${fText("heuresSemaine", "Heures / semaine", m.heuresSemaine, { type: "number" })}${fText("congesAcquis", "Congés payés par an (jours " + uniteLabel() + ")", m.congesAcquis, { type: "number", attrs: ' step="0.5"' })}</div>
       <div class="field-row">${fText("dateEntree", "Date d'entrée", m.dateEntree, { type: "date" })}${fText("reportConges", "Report période précédente (jours)", m.reportConges || 0, { type: "number", attrs: ' step="0.5"' })}</div>
-      <p class="field-hint" style="margin:-6px 0 12px">25 jours ouvrés par an = 2,08 jours acquis par mois complet de présence. Le report s'ajoute au solde de la période en cours.</p>
+      <p class="field-hint" style="margin:-6px 0 12px">${enOuvrables() ? "30 jours ouvrables par an = 2,5 jours acquis par mois complet de présence (5 semaines)." : "25 jours ouvrés par an = 2,08 jours acquis par mois complet de présence (5 semaines)."} Le report s'ajoute au solde de la période en cours.</p>
       <div class="field-row">${fText("pin", "Code PIN (accès au module)", m.pin)}
         <div class="field"><label>Couleur</label><input type="color" name="couleur" value="${m.couleur}" style="height:44px;padding:4px"></div></div>
       <label class="chk-line" style="margin-bottom:10px"><input type="checkbox" name="salarie" ${m.salarie ? "checked" : ""}> Salarié·e — mis·e en congés lors des fermetures du cabinet</label>
@@ -1295,11 +1337,12 @@
       <label class="chk-line"><input type="checkbox" name="weekend" ${r.afficherWeekend ? "checked" : ""}> Afficher le samedi et le dimanche dans le planning</label>
 
       <div class="tab-section-label" style="margin-top:18px">Congés payés</div>
+      ${fSelect("uniteConges", "Unité de décompte", r.uniteConges || "ouvrables", [{ v: "ouvrables", l: "Jours ouvrables — lundi à samedi, 30 j/an, règle légale (comme les contrats)" }, { v: "ouvres", l: "Jours ouvrés — lundi à vendredi, 25 j/an" }])}
       <div class="field-row">
         ${fSelect("modeConges", "Calcul des congés acquis", r.modeConges || "mensuel", [{ v: "mensuel", l: "1/12 du droit annuel par mois de présence" }, { v: "fixe", l: "Droit annuel entier dès le début de période" }])}
-        ${fSelect("periodeRefMois", "Période de référence", String(r.periodeRefMois || 1), [{ v: "1", l: "Année civile (1er janvier → 31 décembre)" }, { v: "6", l: "Légale (1er juin → 31 mai)" }])}
+        ${fSelect("periodeRefMois", "Période de référence", String(r.periodeRefMois || 6), [{ v: "6", l: "Légale (1er juin → 31 mai)" }, { v: "1", l: "Année civile (1er janvier → 31 décembre)" }])}
       </div>
-      <p class="field-hint" style="margin:-6px 0 0">Le droit annuel se règle dans la fiche de chaque membre (25 jours ouvrés par défaut).</p>
+      <p class="field-hint" style="margin:-6px 0 0">Le droit annuel se règle dans la fiche de chaque membre. En changeant d'unité, les fiches encore à la valeur par défaut (30 ouvrables ou 25 ouvrés) sont converties automatiquement.</p>
 
       <div class="tab-section-label" style="margin-top:18px">Créneaux horaires par défaut</div>
       <p class="pc-meta" style="margin:-6px 0 8px">Servent au remplissage ci-dessous et pré-remplissent les nouvelles journées.</p>
@@ -1323,7 +1366,16 @@
     const ov = openModal("Horaires par défaut & paramètres", body, (ov) => {
       state.reglages.afficherWeekend = ov.querySelector("[name=weekend]").checked;
       state.reglages.modeConges = val(ov, "modeConges") || "mensuel";
-      state.reglages.periodeRefMois = Number(val(ov, "periodeRefMois")) || 1;
+      state.reglages.periodeRefMois = Number(val(ov, "periodeRefMois")) || 6;
+      const unite = val(ov, "uniteConges") || "ouvrables";
+      if (unite !== (state.reglages.uniteConges || "ouvrables")) {
+        // conversion des droits annuels laissés à la valeur par défaut
+        const de = unite === "ouvrables" ? 25 : 30, vers = unite === "ouvrables" ? 30 : 25;
+        state.membres.forEach(m => { if (Number(m.congesAcquis) === de) m.congesAcquis = vers; });
+        state.reglages.congesAnnuelDefaut = vers;
+        state.reglages.uniteConges = unite;
+        toast("Décompte en jours " + (unite === "ouvrables" ? "ouvrables" : "ouvrés") + " activé.");
+      }
       const def = getDef(); if (def.length) state.reglages.creneauxDefaut = def;
       save(); render();
     }, "Enregistrer les paramètres");
