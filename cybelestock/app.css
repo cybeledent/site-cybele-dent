@@ -601,3 +601,10 @@ svg.ico { flex-shrink: 0; vertical-align: middle; }
 
 .detail-table .price-head, .detail-table .price-row { grid-template-columns: 2.2fr .9fr 1fr 1fr; }
 @media (max-width: 700px) { .detail-table .price-head, .detail-table .price-row { grid-template-columns: 1.8fr .8fr .9fr .9fr; } }
+
+/* Conditionnement à la réception */
+.cond-box { background: var(--accent-light); border-radius: 14px; padding: 12px 14px; margin-bottom: 12px; }
+.cond-title { font-size: .92rem; color: var(--accent-dark); }
+.cond-row { display: flex; gap: 6px; }
+.cond-row input:first-child { width: 72px; flex: 0 0 72px; text-align: center; font-weight: 700; }
+.cond-result { margin-top: 10px; font-size: .95rem; color: var(--accent-dark); }
