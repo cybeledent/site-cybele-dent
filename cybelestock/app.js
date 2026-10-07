@@ -1118,12 +1118,25 @@
     const p = produit(pid); if (!p) return;
     const scanned = opts.scanned || null;
     const refSel = opts.refId || (p.references[0] ? p.references[0].id : "");
+    const rec = opts.reception || null; // { l, reste, cond } : réception d'une ligne de commande
     openModal("＋ Entrée — " + esc(p.name), `
       ${scanned ? `<div class="scan-result-prod"><div class="p-name">📷 Code reconnu</div>
         <div class="p-sub">${scanned.peremption ? "péremption " + fmtDate(scanned.peremption) + " · " : ""}${scanned.lot ? "lot " + esc(scanned.lot) : ""}</div></div>` : ""}
       ${opts.hint ? `<div class="scan-result-prod ${opts.hintWarn ? "hint-warn" : ""}"><div class="p-sub">${opts.hint}</div></div>` : ""}
+      ${rec ? `
+      <div class="cond-box">
+        <div class="cond-title">Commandé : <b>${rec.l.qty} boîte${rec.l.qty > 1 ? "s" : ""}</b>${rec.l.prix ? ` à <b>${fmtEur(rec.l.prix)}</b> la boîte` : ""}${rec.reste < rec.l.qty ? ` · reste ${rec.reste} à recevoir` : ""}</div>
+        <div class="form-grid" style="margin-top:8px">
+          <div class="field"><label>Boîtes reçues maintenant</label>${stepperHtml("en-boites", rec.reste || 1)}</div>
+          <div class="field"><label>Chaque boîte contient</label>
+            <div class="cond-row"><input id="en-cond" type="number" min="1" inputmode="numeric" value="${rec.cond}">
+              <input id="en-unite" value="${esc(p.unite)}" placeholder="seringue, sachet…" title="Unité comptée en stock"></div></div>
+        </div>
+        <div class="cond-result" id="en-cond-result"></div>
+        <div class="field-hint">Si une boîte = une unité de stock, laissez 1. Le prix de la boîte est divisé par ce nombre pour la valeur du stock.</div>
+      </div>` : ""}
       <div class="form-grid">
-        <div class="field full"><label>Quantité (${esc(p.unite)}s)</label>${stepperHtml("en-qty", opts.qty || 1)}</div>
+        <div class="field full" ${rec ? "hidden" : ""}><label>Quantité (${esc(p.unite)}s)</label>${stepperHtml("en-qty", opts.qty || 1)}</div>
         <div class="field full"><label>Référence commandée</label>
           <select id="en-ref">
             <option value="">— non précisée —</option>
@@ -1140,10 +1153,37 @@
       `<button class="btn" data-cancel style="flex:1;justify-content:center">Annuler</button>
        <button class="btn btn-primary" data-ok style="flex:2;justify-content:center">Ajouter au stock</button>`);
     bindSteppers();
+    // Réception : quantité entrée = boîtes reçues × unités par boîte (recalculée en direct)
+    const majCond = () => {
+      if (!rec) return;
+      const boites = Math.max(1, Number(document.getElementById("en-boites").value) || 1);
+      const cond = Math.max(1, Math.round(Number(document.getElementById("en-cond").value) || 1));
+      const unite = document.getElementById("en-unite").value.trim() || p.unite;
+      document.getElementById("en-qty").value = boites * cond;
+      const pu = rec.l.prix ? rec.l.prix / cond : 0;
+      document.getElementById("en-cond-result").innerHTML = `→ <b>${boites * cond} ${esc(unite)}${boites * cond > 1 ? "s" : ""}</b> entre${boites * cond > 1 ? "nt" : ""} en stock${pu ? ` à <b>${fmtEur(pu)}</b> l'unité` : ""}`;
+    };
+    if (rec) { ["en-boites", "en-cond", "en-unite"].forEach(id => { const el = document.getElementById(id); el.oninput = majCond; el.onchange = majCond; }); modalRoot.querySelectorAll("[data-step]").forEach(b => b.addEventListener("click", majCond)); majCond(); }
     modalRoot.querySelector("[data-cancel]").onclick = closeModal;
     modalRoot.querySelector("[data-ok]").onclick = () => {
+      let boites = null;
+      if (rec) {
+        majCond();
+        boites = Math.max(1, Number(document.getElementById("en-boites").value) || 1);
+        const cond = Math.max(1, Math.round(Number(document.getElementById("en-cond").value) || 1));
+        const unite = document.getElementById("en-unite").value.trim();
+        if (unite && unite !== p.unite) p.unite = unite;
+      }
       const qty = Math.max(1, Number(document.getElementById("en-qty").value) || 1);
-      const refId = document.getElementById("en-ref").value || null;
+      let refId = document.getElementById("en-ref").value || null;
+      if (rec) {
+        // La référence reçue porte le conditionnement (et le prix de la commande si elle n'en a pas)
+        let r = refId ? reference(p, refId) : null;
+        if (!r) r = assurerReferenceLigne(p, rec.l, rec.c, null);
+        r.cond = Math.max(1, Math.round(Number(document.getElementById("en-cond").value) || 1));
+        if (!parsePrix(r.prix) && rec.l.prix) r.prix = String(rec.l.prix).replace(".", ",");
+        rec.l.produitId = p.id; rec.l.refId = r.id; refId = r.id;
+      }
       const perempt = document.getElementById("en-perempt").value || null;
       const lotNum = document.getElementById("en-lot").value.trim() || null;
       // Fusionne avec un lot identique (même réf, même péremption, même n° de lot)
@@ -1151,7 +1191,7 @@
       if (same) same.qty += qty;
       else p.lots.push({ id: uid(), refId, qty, peremption: perempt, lot: lotNum, entree: todayIso() });
       save(); closeModal();
-      if (typeof opts.onDone === "function") { opts.onDone(qty); }
+      if (typeof opts.onDone === "function") { opts.onDone(qty, boites); }
       else { render(); toast(`＋${qty} ${p.name} (stock : ${stockTotal(p)})`); }
     };
   }
@@ -1898,8 +1938,9 @@
     const reste = Math.max(0, l.qty - l.recu);
     const p = l.produitId ? produit(l.produitId) : null;
     const cond = p ? condRef(p, l.refId) : 1; // unités de stock par boîte commandée
-    const apres = (qty) => {
-      l.recu = Math.min(l.qty, Math.round((l.recu + qty / cond) * 100) / 100);
+    const apres = (qty, boites) => {
+      const avance = boites != null ? boites : qty / cond;
+      l.recu = Math.min(l.qty, Math.round((l.recu + avance) * 100) / 100);
       c.statut = statutCommande(c);
       save();
       if (c.statut === "recue") proposerArchivage(c);
@@ -1910,7 +1951,8 @@
       const refOk = l.refId && reference(p, l.refId) ? l.refId : (p.references[0] ? p.references[0].id : null);
       openEntreeModal(p.id, {
         scanned, refId: refOk, qty: Math.max(1, Math.ceil(reste * cond)),
-        hint: `🚚 Commande ${esc(c.numero || "")} — ${reste} boîte${reste > 1 ? "s" : ""} attendue${reste > 1 ? "s" : ""} sur cette ligne${cond > 1 ? ` (${cond} unités par boîte)` : ""}. La quantité saisie entre en stock et valide la réception.`,
+        reception: { c, l, reste: Math.max(1, Math.ceil(reste)), cond },
+        hint: `🚚 Commande ${esc(c.numero || "")} ${esc(nomFournisseurCommande(c))} — ${esc(nomLigne(l))}`,
         onDone: apres,
       });
     } else {
