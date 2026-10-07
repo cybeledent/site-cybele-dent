@@ -75,7 +75,8 @@ Restent **provisoires** à remplacer (« Rechercher / Remplacer » dans tous les
   photo, visez moins de 500 Ko (format JPEG, 1600 à 1800 px de large).
 - **Assistants IA (ChatGPT, Perplexity, Claude…)** : `robots.txt` autorise tous les robots sur les
   pages publiques (et exclut les applications internes), et `llms.txt` résume le site en texte
-  clair pour les assistants IA. Pensez à mettre `llms.txt` à jour quand les horaires, l'équipe ou
+  clair pour les assistants IA ; `llms-full.txt` en reprend le texte intégral (à régénérer après une
+  modification des pages). Pensez à mettre `llms.txt` à jour quand les horaires, l'équipe ou
   les soins changent. Inscriptions à faire une fois : Bing Webmaster Tools (import depuis Google
   Search Console), Bing Places et Apple Business Connect.
 - **Auteur et date** : chaque page de soin affiche « Rédigé et relu par le Dr Céline Filipputti · Dernière mise à jour : … » (signal de confiance pour Google et les assistants IA). La date est définie dans les générateurs du site (`DATE_MAJ`) : mettez-la à jour quand vous relisez réellement les pages.
