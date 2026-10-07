@@ -1834,7 +1834,7 @@
           </div>
           ${c.statut === "archivee" ? "" : `
           <div class="qty-btns">
-            ${!done ? `<button class="btn btn-sm btn-primary" data-recu="${l.id}" title="Valider la réception de cette ligne">✔ Reçu</button>` : `<button class="btn btn-sm" data-unrecu="${l.id}" title="Annuler la réception (le stock n'est pas modifié)">↩</button>`}
+            ${!done ? `<button class="btn btn-sm btn-primary" data-recu="${l.id}" title="${p ? "Valider la réception : entrée en stock" : "Rattacher à un produit (ou créer sa fiche) puis entrer en stock"}">✔ Reçu</button>` : `<button class="btn btn-sm" data-unrecu="${l.id}" title="Annuler la réception (le stock n'est pas modifié)">↩</button>`}
           </div>`}
         </div>`;
     };
@@ -1905,6 +1905,7 @@
       if (c.statut === "recue") proposerArchivage(c);
       else { render(); toast(`✔ ${nomLigne(l)} — ${l.recu}/${l.qty} reçu${l.recu > 1 ? "s" : ""}`); }
     };
+    if (!p) { openLierLigneModal(c, l, scanned || null); return; }
     if (p) {
       const refOk = l.refId && reference(p, l.refId) ? l.refId : (p.references[0] ? p.references[0].id : null);
       openEntreeModal(p.id, {
@@ -1932,6 +1933,103 @@
                  : `⚠ « ${esc(p ? p.name : "?")} » ne figure pas dans la commande ${esc(c.numero || "")}. L'entrée sera ajoutée au stock hors commande.`,
       onDone: () => { render(); toast("Entrée hors commande ajoutée au stock."); },
     });
+  }
+
+  // Garantit que le produit a une référence correspondant à la ligne de commande
+  // (fournisseur de la commande, réf, prix) et y mémorise le code scanné s'il y en a un.
+  function assurerReferenceLigne(p, l, c, gtin) {
+    const fournId = c.fournisseurId || "";
+    let r = l.refId ? reference(p, l.refId) : null;
+    if (!r && fournId) r = p.references.find(x => x.fournisseurId === fournId && (!l.ref || !x.ref || normRef(x.ref) === normRef(l.ref))) || null;
+    if (!r && !fournId && p.references.length === 1) r = p.references[0];
+    if (!r) {
+      r = { id: uid(), fournisseurId: fournId, ref: l.ref || "", designation: l.designation || "", url: "", note: "",
+        prix: l.prix ? String(l.prix).replace(".", ",") : "", cond: 1, gtins: [] };
+      p.references.push(r);
+    } else {
+      if (!r.ref && l.ref) r.ref = l.ref;
+      if (!parsePrix(r.prix) && l.prix) r.prix = String(l.prix).replace(".", ",");
+    }
+    if (gtin && !r.gtins.some(g => normGtin(g) === normGtin(gtin))) r.gtins.push(gtin);
+    l.produitId = p.id; l.refId = r.id;
+    return r;
+  }
+
+  // « ✔ Reçu » (ou scan) sur une ligne qui n'est pas encore un produit du stock :
+  // rattacher à un produit existant, ou créer sa fiche — puis entrée en stock.
+  function openLierLigneModal(c, l, parsed) {
+    const reste = Math.max(0, l.qty - l.recu);
+    openModal("Cet article n'est pas encore dans le stock", `
+      <div class="scan-result-prod">
+        <div class="p-name">${esc(nomLigne(l))}</div>
+        <div class="p-sub">${reste} attendu${reste > 1 ? "s" : ""}${l.ref ? " · réf " + esc(l.ref) : ""}${l.prix ? " · " + fmtEur(l.prix) : ""} — commande ${esc(c.numero || "")} ${esc(nomFournisseurCommande(c))}</div>
+      </div>
+      <div id="ll-choose">
+        <div class="field full"><label>C'est un produit déjà suivi ? Cherchez-le :</label>
+          <input id="ll-search" placeholder="Tapez quelques lettres pour filtrer…" autocomplete="off"></div>
+        <div id="ll-list" class="as-list"></div>
+      </div>
+      <div id="ll-new" hidden>
+        <div class="form-grid">
+          <div class="field full"><label>Nom du nouveau produit</label><input id="ll-name" value="${esc(nomLigne(l))}"></div>
+          <div class="field"><label>Catégorie</label>
+            <select id="ll-cat">${state.categories.map(cat => `<option value="${cat.id}">${esc(cat.name)}</option>`).join("")}</select></div>
+          <div class="field"><label>Unité</label><input id="ll-unite" value="boîte"></div>
+        </div>
+        <p class="field-hint" style="margin-top:6px">La fiche sera créée avec la référence et le prix de la commande — vous réglerez son stock idéal et son seuil plus tard.</p>
+      </div>`,
+      `<button class="btn" data-cancel style="justify-content:center">Annuler</button>
+       <button class="btn" data-new style="flex:1;justify-content:center">＋ Nouveau produit</button>
+       <button class="btn btn-primary" data-ok style="flex:1;justify-content:center" disabled>Rattacher et recevoir</button>`);
+    const searchEl = document.getElementById("ll-search"), listEl = document.getElementById("ll-list");
+    const chooseEl = document.getElementById("ll-choose"), newEl = document.getElementById("ll-new");
+    const okBtn = modalRoot.querySelector("[data-ok]"), newBtn = modalRoot.querySelector("[data-new]");
+    let selectedId = null, modeCreate = false;
+    // Pré-filtre avec les premiers mots de la désignation
+    const mots = (l.designation || "").split(/\s+/).filter(w => w.length >= 4).slice(0, 2).join(" ");
+    function renderList() {
+      const q = searchEl.value.trim().toLowerCase();
+      let prods = state.produits.slice().sort((a, b) => a.name.localeCompare(b.name, "fr"));
+      if (q) prods = prods.filter(p => p.name.toLowerCase().includes(q) ||
+        p.references.some(r => (r.ref || "").toLowerCase().includes(q) || (r.designation || "").toLowerCase().includes(q)));
+      const shown = prods.slice(0, 50);
+      listEl.innerHTML = shown.map(p => `<button type="button" class="as-item ${p.id === selectedId ? "sel" : ""}" data-pick="${p.id}">${esc(p.name)}
+        <div class="as-cat">${esc((categorie(p.categorieId) || {}).name || "")} · stock ${stockTotal(p)}</div></button>`).join("")
+        || `<div class="as-cat" style="padding:12px">Aucun produit ne correspond — utilisez « ＋ Nouveau produit ».</div>`;
+      listEl.querySelectorAll("[data-pick]").forEach(b => b.onclick = () => {
+        selectedId = b.dataset.pick;
+        listEl.querySelectorAll(".as-item").forEach(x => x.classList.toggle("sel", x.dataset.pick === selectedId));
+        okBtn.disabled = false;
+      });
+    }
+    searchEl.oninput = renderList;
+    searchEl.value = mots; renderList();
+    if (!listEl.querySelector("[data-pick]")) { searchEl.value = ""; renderList(); }
+    newBtn.onclick = () => {
+      modeCreate = !modeCreate;
+      chooseEl.hidden = modeCreate; newEl.hidden = !modeCreate;
+      newBtn.textContent = modeCreate ? "← Produit existant" : "＋ Nouveau produit";
+      okBtn.textContent = modeCreate ? "Créer la fiche et recevoir" : "Rattacher et recevoir";
+      okBtn.disabled = modeCreate ? false : !selectedId;
+    };
+    modalRoot.querySelector("[data-cancel]").onclick = closeModal;
+    okBtn.onclick = () => {
+      let p;
+      if (modeCreate) {
+        const name = document.getElementById("ll-name").value.trim();
+        if (!name) { toast("Donnez un nom au produit."); return; }
+        p = { id: uid(), categorieId: document.getElementById("ll-cat").value, name,
+          unite: document.getElementById("ll-unite").value.trim() || "boîte", stockIdeal: 0, seuilMini: 0,
+          alertePeremption: !!(parsed && parsed.peremption), delaiAlerteMois: 3, enCave: false, note: "", references: [], lots: [] };
+        state.produits.push(p);
+        l.refId = null;
+      } else {
+        p = produit(selectedId); if (!p) return;
+      }
+      assurerReferenceLigne(p, l, c, parsed ? parsed.gtin : null);
+      save(); closeModal();
+      recevoirLigne(c, l.id, parsed);
+    };
   }
 
   // Code inconnu scanné pendant une réception : on propose seulement les
@@ -1993,16 +2091,7 @@
         state.produits.push(p);
         chosen.produitId = p.id; chosen.refId = null;
       }
-      // Référence : celle de la ligne, sinon celle du fournisseur de la commande, sinon nouvelle
-      let r = chosen.refId ? reference(p, chosen.refId) : null;
-      if (!r && fournId) r = p.references.find(x => x.fournisseurId === fournId && (!chosen.ref || normRef(x.ref) === normRef(chosen.ref))) || null;
-      if (!r) {
-        r = { id: uid(), fournisseurId: fournId, ref: chosen.ref || "", designation: chosen.designation || "", url: "", note: "",
-          prix: chosen.prix ? String(chosen.prix).replace(".", ",") : "", cond: 1, gtins: [] };
-        p.references.push(r);
-      } else if (!parsePrix(r.prix) && chosen.prix) { r.prix = String(chosen.prix).replace(".", ","); }
-      if (!r.gtins.some(g => normGtin(g) === normGtin(parsed.gtin))) r.gtins.push(parsed.gtin);
-      chosen.refId = r.id;
+      assurerReferenceLigne(p, chosen, c, parsed.gtin);
       save(); closeModal();
       recevoirLigne(c, chosen.id, parsed);
     };
