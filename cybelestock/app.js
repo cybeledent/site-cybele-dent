@@ -1965,7 +1965,7 @@
         <div class="p-sub">${reste} attendu${reste > 1 ? "s" : ""}${l.ref ? " · réf " + esc(l.ref) : ""}${l.prix ? " · " + fmtEur(l.prix) : ""} — commande ${esc(c.numero || "")} ${esc(nomFournisseurCommande(c))}</div>
       </div>
       <div id="ll-choose">
-        <div class="field full"><label>C'est un produit déjà suivi ? Cherchez-le :</label>
+        <div class="field full"><label>C'est une nouvelle référence d'un produit déjà suivi ? Choisissez-le (le code et la réf. seront ajoutés à sa fiche) :</label>
           <input id="ll-search" placeholder="Tapez quelques lettres pour filtrer…" autocomplete="off"></div>
         <div id="ll-list" class="as-list"></div>
       </div>
@@ -2053,44 +2053,27 @@
             ${p ? " · produit du stock : " + esc(p.name) : ' · <span class="cmd-unlinked">nouveau produit à créer</span>'}</div></button>`;
         }).join("") : '<div class="as-cat" style="padding:12px">Toutes les lignes de cette commande sont déjà reçues.</div>'}
       </div>
-      <div id="ra-new" hidden style="margin-top:12px">
-        <div class="form-grid">
-          <div class="field full"><label>Nom du nouveau produit</label><input id="ra-name"></div>
-          <div class="field"><label>Catégorie</label>
-            <select id="ra-cat">${state.categories.map(cat => `<option value="${cat.id}">${esc(cat.name)}</option>`).join("")}</select></div>
-          <div class="field"><label>Unité</label><input id="ra-unite" value="boîte"></div>
-        </div>
-        <p class="field-hint" style="margin-top:6px">Le produit sera créé avec la référence, le prix de la commande et ce code — vous réglerez son stock idéal et son seuil plus tard dans sa fiche.</p>
       </div>`,
       `<button class="btn" data-cancel style="justify-content:center">Annuler</button>
-       <button class="btn" data-all style="justify-content:center">Autre produit du stock…</button>
+       <button class="btn" data-all style="justify-content:center" title="Choisir dans tout le stock">Autre produit</button>
        <button class="btn btn-primary" data-ok style="flex:1;justify-content:center" disabled>Valider</button>`);
-    const listEl = document.getElementById("ra-list"), newEl = document.getElementById("ra-new");
+    const listEl = document.getElementById("ra-list");
     const okBtn = modalRoot.querySelector("[data-ok]");
     let chosen = null;
     listEl.querySelectorAll("[data-pick]").forEach(b => b.onclick = () => {
       chosen = lignes.find(l => l.id === b.dataset.pick);
       listEl.querySelectorAll(".as-item").forEach(x => x.classList.toggle("sel", x === b));
       const p = chosen.produitId ? produit(chosen.produitId) : null;
-      newEl.hidden = !!p;
-      if (!p) { const n = document.getElementById("ra-name"); if (!n.value) n.value = nomLigne(chosen); }
       okBtn.disabled = false;
-      okBtn.textContent = p ? "Associer et recevoir" : "Créer le produit et recevoir";
+      okBtn.textContent = p ? "Associer et recevoir" : "Continuer →";
     });
     modalRoot.querySelector("[data-cancel]").onclick = closeModal;
     modalRoot.querySelector("[data-all]").onclick = () => { closeModal(); openAssociateModal(parsed); };
     okBtn.onclick = () => {
       if (!chosen) return;
-      let p = chosen.produitId ? produit(chosen.produitId) : null;
-      if (!p) {
-        const name = document.getElementById("ra-name").value.trim();
-        if (!name) { toast("Donnez un nom au produit."); return; }
-        p = { id: uid(), categorieId: document.getElementById("ra-cat").value, name,
-          unite: document.getElementById("ra-unite").value.trim() || "boîte", stockIdeal: 0, seuilMini: 0,
-          alertePeremption: !!parsed.peremption, delaiAlerteMois: 3, enCave: false, note: "", references: [], lots: [] };
-        state.produits.push(p);
-        chosen.produitId = p.id; chosen.refId = null;
-      }
+      const p = chosen.produitId ? produit(chosen.produitId) : null;
+      // Pas encore un produit du stock : rattacher à un produit existant (nouvelle référence) ou créer la fiche
+      if (!p) { closeModal(); openLierLigneModal(c, chosen, parsed); return; }
       assurerReferenceLigne(p, chosen, c, parsed.gtin);
       save(); closeModal();
       recevoirLigne(c, chosen.id, parsed);
