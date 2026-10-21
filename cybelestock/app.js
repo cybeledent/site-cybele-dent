@@ -269,6 +269,14 @@
         l.qty = Math.max(1, Math.round(Number(l.qty) || 1));
         l.prix = Number(l.prix) > 0 ? Number(l.prix) : 0;
         l.recu = Math.max(0, Math.round((Number(l.recu) || 0) * 100) / 100);
+        // Retour fournisseur (boîtes non entrées en stock) : { qty, date, motif, note, statut }
+        if (l.retour && typeof l.retour === "object" && Number(l.retour.qty) > 0) {
+          l.retour = {
+            qty: Math.round(Number(l.retour.qty) * 100) / 100, date: l.retour.date || todayIso(),
+            motif: String(l.retour.motif || ""), note: String(l.retour.note || ""),
+            statut: ["a_renvoyer", "renvoye", "rembourse"].includes(l.retour.statut) ? l.retour.statut : "a_renvoyer",
+          };
+        } else l.retour = null;
       });
       if (c.statut !== "archivee") c.statut = statutCommande(c);
     });
@@ -1709,15 +1717,31 @@
      ========================================================= */
   function commandeSuivi(id) { return state.commandesSuivi.find(c => c.id === id) || null; }
 
+  // Boîtes retournées au fournisseur sur une ligne (jamais entrées en stock)
+  function retourQty(l) { return l.retour && l.retour.qty > 0 ? l.retour.qty : 0; }
+  // Boîtes encore attendues : commandées − reçues − retournées
+  function attenduLigne(l) { return Math.max(0, Math.round((l.qty - (l.recu || 0) - retourQty(l)) * 100) / 100); }
   function statutCommande(c) {
     if (c.statut === "archivee") return "archivee";
     if (!c.lignes.length) return "attente";
-    const complete = c.lignes.every(l => l.recu >= l.qty);
+    const complete = c.lignes.every(l => attenduLigne(l) === 0);
     if (complete) return "recue";
-    return c.lignes.some(l => l.recu > 0) ? "partielle" : "attente";
+    return c.lignes.some(l => l.recu > 0 || retourQty(l) > 0) ? "partielle" : "attente";
   }
-  function resteCommande(c) { return c.lignes.reduce((t, l) => t + Math.max(0, l.qty - l.recu), 0); }
-  function reliquats(c) { return c.lignes.filter(l => l.recu < l.qty); }
+  function resteCommande(c) { return c.lignes.reduce((t, l) => t + attenduLigne(l), 0); }
+  function reliquats(c) { return c.lignes.filter(l => attenduLigne(l) > 0); }
+  // Tous les retours (toutes commandes), les plus récents d'abord
+  function tousRetours() {
+    const out = [];
+    state.commandesSuivi.forEach(c => c.lignes.forEach(l => { if (retourQty(l) > 0) out.push({ c, l, r: l.retour }); }));
+    return out.sort((a, b) => (a.r.date < b.r.date ? 1 : a.r.date > b.r.date ? -1 : 0));
+  }
+  // Montant remboursé par le fournisseur (retours au statut « remboursé »)
+  function montantRembourse(c) {
+    return c.lignes.reduce((t, l) => t + (l.retour && l.retour.statut === "rembourse" ? retourQty(l) * (l.prix || 0) : 0), 0);
+  }
+  const RETOUR_LABEL = { a_renvoyer: "À renvoyer", renvoye: "Renvoyé — en attente du remboursement", rembourse: "Remboursé" };
+  const RETOUR_MOTIFS = ["Erreur de commande", "Produit abîmé à la livraison", "Produit non conforme", "Périmé ou péremption trop courte", "Doublon / commandé en trop", "Autre"];
   function nomFournisseurCommande(c) {
     const f = c.fournisseurId ? fournisseur(c.fournisseurId) : null;
     return f ? f.name : (c.fournisseurNom || "Fournisseur ?");
@@ -1784,6 +1808,7 @@
     const archivees = state.commandesSuivi.filter(c => c.statut === "archivee")
       .sort((a, b) => ((a.archiveeLe || a.date) < (b.archiveeLe || b.date) ? 1 : -1));
     const gmailOk = !!(state.gmail && state.gmail.clientId);
+    const nbRetours = tousRetours().filter(x => x.r.statut !== "rembourse").length;
 
     let html = `
       <h2 class="view-title">${ico("truck", 24)} Commandes</h2>
@@ -1791,11 +1816,14 @@
       <div class="fiche-tabs">
         <button class="fiche-tab ${cmdTab === "encours" ? "active" : ""}" data-ctab="encours">✉ En cours (${enCours.length})</button>
         <button class="fiche-tab ${cmdTab === "archivees" ? "active" : ""}" data-ctab="archivees">📁 Archivées (${archivees.length})</button>
+        <button class="fiche-tab ${cmdTab === "retours" ? "active" : ""}" data-ctab="retours">↩ Retours${nbRetours ? " (" + nbRetours + ")" : ""}</button>
         <button class="fiche-tab ${cmdTab === "finances" ? "active" : ""}" data-ctab="finances">€ Dépenses & valeur</button>
       </div>`;
 
     if (cmdTab === "finances") {
       html += renderFinances();
+    } else if (cmdTab === "retours") {
+      html += renderRetours();
     } else {
       html += `
         <div class="toolbar">
@@ -1824,12 +1852,13 @@
     const bGmail = document.getElementById("cmd-gmail");
     if (bGmail) bGmail.onclick = () => { if (gmailOk) gmailVerifier({ manuel: true }); else openGmailAideModal(); };
     app.querySelectorAll("[data-open-cmd]").forEach(el => el.onclick = () => switchView("commande", { commandeId: el.dataset.openCmd }));
-    bindFinances();
+    bindFinances(); bindRetours();
   }
 
   function commandeCard(c) {
     const reste = resteCommande(c), total = c.lignes.reduce((t, l) => t + l.qty, 0);
     const rel = reliquats(c);
+    const nbRet = c.lignes.filter(l => retourQty(l) > 0 && l.retour.statut !== "rembourse").length;
     return `
       <div class="cmd-card cmd-${c.statut}" data-open-cmd="${c.id}">
         <div class="cmd-top">
@@ -1842,6 +1871,7 @@
         </div>
         ${c.statut === "partielle" ? `<div class="cmd-reliquat">Reliquat : ${reste}/${total} article${reste > 1 ? "s" : ""} — ${rel.slice(0, 3).map(l => esc(l.designation || nomLigne(l))).join(", ")}${rel.length > 3 ? "…" : ""}</div>` : ""}
         ${c.statut === "recue" ? `<div class="cmd-reliquat ok">Tout est arrivé — pensez à archiver.</div>` : ""}
+        ${nbRet ? `<div class="cmd-reliquat retour">↩ ${nbRet} ligne${nbRet > 1 ? "s" : ""} en retour fournisseur</div>` : ""}
       </div>`;
   }
   function nomLigne(l) {
@@ -1859,22 +1889,26 @@
     const rel = reliquats(c);
     const totalQty = c.lignes.reduce((t, l) => t + l.qty, 0);
     const recuQty = c.lignes.reduce((t, l) => t + Math.min(l.recu, l.qty), 0);
+    const retQty = c.lignes.reduce((t, l) => t + retourQty(l), 0);
 
     const ligneHtml = (l, isRel) => {
       const p = l.produitId ? produit(l.produitId) : null;
-      const reste = Math.max(0, l.qty - l.recu);
+      const reste = attenduLigne(l);
       const done = reste === 0;
+      const ret = retourQty(l);
       return `
-        <div class="cmd-line ${done ? "done" : ""} ${isRel ? "rel" : ""}">
+        <div class="cmd-line ${done ? "done" : ""} ${isRel ? "rel" : ""} ${ret ? "has-retour" : ""}">
           <div class="cmd-line-qty">${Number.isInteger(l.recu) ? l.recu : l.recu.toFixed(1)}/${l.qty}</div>
           <div class="grow">
             <div class="cmd-line-name">${esc(nomLigne(l))}</div>
             <div class="lot-sub">${l.ref ? "réf " + esc(l.ref) + " · " : ""}${l.prix ? fmtEur(l.prix) + " la boîte" : "prix inconnu"}
               ${p ? ` · <span data-goto="${p.id}" style="cursor:pointer;text-decoration:underline">${esc(p.name)}</span> (stock ${stockTotal(p)})` : ` · <span class="cmd-unlinked">non lié à un produit</span>`}</div>
+            ${ret ? `<div class="cmd-retour-info" data-retour-tab title="Voir dans l'onglet Retours">↩ ${ret} boîte${ret > 1 ? "s" : ""} en retour · ${esc(RETOUR_LABEL[l.retour.statut])}${l.retour.motif ? " · " + esc(l.retour.motif) : ""}</div>` : ""}
           </div>
           ${c.statut === "archivee" ? "" : `
           <div class="qty-btns">
-            ${!done ? `<button class="btn btn-sm btn-primary" data-recu="${l.id}" title="${p ? "Valider la réception : entrée en stock" : "Rattacher à un produit (ou créer sa fiche) puis entrer en stock"}">✔ Reçu</button>` : `<button class="btn btn-sm" data-unrecu="${l.id}" title="Annuler la réception (le stock n'est pas modifié)">↩</button>`}
+            ${!done ? `<button class="btn btn-sm btn-primary" data-recu="${l.id}" title="${p ? "Valider la réception : entrée en stock" : "Rattacher à un produit (ou créer sa fiche) puis entrer en stock"}">✔ Reçu</button>
+            <button class="btn btn-sm btn-retour" data-retour="${l.id}" title="À renvoyer au fournisseur : ne rentre pas en stock">↩ Retour</button>` : (l.recu > 0 ? `<button class="btn btn-sm" data-unrecu="${l.id}" title="Annuler la réception (le stock n'est pas modifié)">↩</button>` : "")}
           </div>`}
         </div>`;
     };
@@ -1895,8 +1929,8 @@
         ${c.statut === "recue" ? `<button class="btn" id="cmd-archive">📁 Archiver</button>` : ""}
         <button class="btn btn-danger btn-sm" id="cmd-del" style="margin-left:auto">🗑</button>
       </div>
-      <div class="cmd-progress"><div style="width:${totalQty ? Math.round(recuQty / totalQty * 100) : 0}%"></div></div>
-      <div class="lot-sub" style="margin:-6px 0 12px">${recuQty} / ${totalQty} article${totalQty > 1 ? "s" : ""} reçu${recuQty > 1 ? "s" : ""}</div>` : `
+      <div class="cmd-progress"><div style="width:${totalQty ? Math.round((recuQty + retQty) / totalQty * 100) : 0}%"></div></div>
+      <div class="lot-sub" style="margin:-6px 0 12px">${recuQty} / ${totalQty} article${totalQty > 1 ? "s" : ""} reçu${recuQty > 1 ? "s" : ""}${retQty ? ` · ${retQty} en retour` : ""}</div>` : `
       <div class="toolbar">
         <button class="btn" id="cmd-unarchive">↩ Sortir des archives</button>
         <button class="btn btn-danger btn-sm" id="cmd-del" style="margin-left:auto">🗑</button>
@@ -1925,9 +1959,94 @@
       save(); switchView("commandes"); toast("Commande supprimée.");
     };
     app.querySelectorAll("[data-recu]").forEach(b => b.onclick = () => recevoirLigne(c, b.dataset.recu, null));
+    app.querySelectorAll("[data-retour]").forEach(b => b.onclick = () => openRetourModal(c, b.dataset.retour));
+    app.querySelectorAll("[data-retour-tab]").forEach(el => el.onclick = () => { cmdTab = "retours"; switchView("commandes"); });
     app.querySelectorAll("[data-unrecu]").forEach(b => b.onclick = () => {
       const l = c.lignes.find(x => x.id === b.dataset.unrecu); if (!l) return;
       l.recu = 0; c.statut = statutCommande(c); save(); render();
+    });
+  }
+
+  /* =========================================================
+     RETOURS FOURNISSEUR
+     Une ligne (ou une partie) marquée « Retour » n'entre pas en stock :
+     elle compte comme traitée pour la commande et apparaît dans
+     l'onglet « Retours » jusqu'au remboursement.
+     ========================================================= */
+  function openRetourModal(c, ligneId) {
+    const l = c.lignes.find(x => x.id === ligneId); if (!l) return;
+    const reste = attenduLigne(l); if (reste <= 0) return;
+    const r = l.retour || null;
+    openModal("↩ Retour au fournisseur", `
+      <div class="scan-result-prod">
+        <div class="p-name">${esc(nomLigne(l))}</div>
+        <div class="p-sub">Commande ${esc(c.numero || "")} ${esc(nomFournisseurCommande(c))} · ${reste} boîte${reste > 1 ? "s" : ""} encore attendue${reste > 1 ? "s" : ""}${l.prix ? " · " + fmtEur(l.prix) + " la boîte" : ""}</div>
+      </div>
+      <div class="field"><label>Boîtes à retourner (elles ne rentrent pas en stock)</label>
+        <div class="stepper"><button type="button" data-step="-1">−</button><input type="number" id="rt-qty" min="1" max="${Math.ceil(reste)}" step="1" value="${Math.ceil(reste)}"><button type="button" data-step="1">+</button></div></div>
+      <div class="field"><label>Motif</label>
+        <select id="rt-motif">${RETOUR_MOTIFS.map(m => `<option ${r && r.motif === m ? "selected" : ""}>${esc(m)}</option>`).join("")}</select></div>
+      <div class="field full"><label>Note (n° de retour, échange prévu, transporteur…)</label>
+        <input id="rt-note" value="${esc(r ? r.note : "")}" placeholder="facultatif"></div>
+      <p class="lot-sub">Le retour s'ajoute à l'onglet « ↩ Retours » : vous pourrez le passer en « renvoyé » puis « remboursé ». La commande est considérée complète une fois tout reçu ou retourné.</p>`,
+      `<button class="btn" data-cancel style="justify-content:center">Annuler</button>
+       <button class="btn btn-primary" data-ok style="flex:1;justify-content:center">↩ Enregistrer le retour</button>`);
+    const qtyEl = modalRoot.querySelector("#rt-qty");
+    modalRoot.querySelectorAll("[data-step]").forEach(b => b.onclick = () => { qtyEl.value = Math.min(Math.ceil(reste), Math.max(1, (Number(qtyEl.value) || 1) + Number(b.dataset.step))); });
+    modalRoot.querySelector("[data-cancel]").onclick = closeModal;
+    modalRoot.querySelector("[data-ok]").onclick = () => {
+      const q = Math.min(reste, Math.max(1, Math.round(Number(qtyEl.value) || 1)));
+      const motif = modalRoot.querySelector("#rt-motif").value, note = modalRoot.querySelector("#rt-note").value.trim();
+      // Un retour déjà en cours sur la ligne : on cumule (même statut « à renvoyer »)
+      l.retour = { qty: Math.round(((r ? r.qty : 0) + q) * 100) / 100, date: todayIso(), motif, note, statut: "a_renvoyer" };
+      c.statut = statutCommande(c);
+      save(); closeModal();
+      if (c.statut === "recue") proposerArchivage(c);
+      else { render(); toast(`↩ ${nomLigne(l)} — ${q} boîte${q > 1 ? "s" : ""} à renvoyer`); }
+    };
+  }
+  function renderRetours() {
+    const tous = tousRetours();
+    const enCours = tous.filter(x => x.r.statut !== "rembourse"), finis = tous.filter(x => x.r.statut === "rembourse");
+    const carte = (x) => {
+      const { c, l, r } = x; const montant = retourQty(l) * (l.prix || 0);
+      return `
+        <div class="cmd-card retour-card retour-${r.statut}">
+          <div class="cmd-top">
+            <span class="cmd-icon">↩</span>
+            <div class="grow">
+              <div class="cmd-title">${esc(nomLigne(l))}</div>
+              <div class="lot-sub">${r.qty} boîte${r.qty > 1 ? "s" : ""}${montant ? " · " + fmtEur(montant) : ""} · <span data-open-cmd="${c.id}" style="cursor:pointer;text-decoration:underline">${esc(nomFournisseurCommande(c))}${c.numero ? " n° " + esc(c.numero) : ""}</span> · ${fmtDate(r.date)}</div>
+              <div class="lot-sub">${esc(r.motif || "")}${r.note ? " — " + esc(r.note) : ""}</div>
+            </div>
+            <span class="pill ${r.statut === "rembourse" ? "p-teal" : r.statut === "renvoye" ? "p-blue" : "p-amber"}">${esc(RETOUR_LABEL[r.statut].split(" — ")[0])}</span>
+          </div>
+          ${r.statut === "rembourse" ? "" : `
+          <div class="qty-btns" style="margin-top:10px;flex-wrap:wrap">
+            ${r.statut === "a_renvoyer" ? `<button class="btn btn-sm btn-primary" data-rt-statut="renvoye" data-rt="${c.id}|${l.id}">📦 Colis renvoyé</button>` : ""}
+            <button class="btn btn-sm ${r.statut === "renvoye" ? "btn-primary" : ""}" data-rt-statut="rembourse" data-rt="${c.id}|${l.id}">€ Remboursé</button>
+            <button class="btn btn-sm btn-danger" data-rt-annule="${c.id}|${l.id}" style="margin-left:auto" title="Annuler le retour : la ligne redevient attendue">✕ Annuler le retour</button>
+          </div>`}
+        </div>`;
+    };
+    let html = `<p class="lot-sub" style="margin:4px 0 12px">Depuis une commande, « ↩ Retour » sur une ligne met de côté les boîtes à renvoyer : elles n'entrent pas en stock. Suivez ici le renvoi puis le remboursement (déduit des dépenses).</p>`;
+    html += enCours.length ? enCours.map(carte).join("") : `<div class="empty-note">Aucun retour en cours.</div>`;
+    if (finis.length) html += `<h4 style="margin:18px 0 8px">Remboursés (${finis.length})</h4>` + finis.map(carte).join("");
+    return html;
+  }
+  function bindRetours() {
+    const trouver = (key) => { const [cid, lid] = key.split("|"); const c = commandeSuivi(cid); const l = c && c.lignes.find(x => x.id === lid); return c && l ? { c, l } : null; };
+    app.querySelectorAll("[data-rt-statut]").forEach(b => b.onclick = () => {
+      const x = trouver(b.dataset.rt); if (!x || !x.l.retour) return;
+      x.l.retour.statut = b.dataset.rtStatut; save(); render();
+      toast(b.dataset.rtStatut === "rembourse" ? "€ Retour remboursé — déduit des dépenses." : "📦 Colis renvoyé — en attente du remboursement.");
+    });
+    app.querySelectorAll("[data-rt-annule]").forEach(b => b.onclick = () => {
+      const x = trouver(b.dataset.rtAnnule); if (!x) return;
+      if (!confirm("Annuler ce retour ? La ligne redevient attendue dans la commande" + (x.c.statut === "archivee" ? " (elle ressort des archives)" : "") + ".")) return;
+      x.l.retour = null;
+      if (x.c.statut === "archivee") { x.c.statut = "attente"; delete x.c.archiveeLe; }
+      x.c.statut = statutCommande(x.c); save(); render();
     });
   }
 
@@ -1935,12 +2054,12 @@
   // habituelle (quantité pré-remplie = reste attendu) ; sinon simple validation.
   function recevoirLigne(c, ligneId, scanned) {
     const l = c.lignes.find(x => x.id === ligneId); if (!l) return;
-    const reste = Math.max(0, l.qty - l.recu);
+    const reste = attenduLigne(l);
     const p = l.produitId ? produit(l.produitId) : null;
     const cond = p ? condRef(p, l.refId) : 1; // unités de stock par boîte commandée
     const apres = (qty, boites) => {
       const avance = boites != null ? boites : qty / cond;
-      l.recu = Math.min(l.qty, Math.round((l.recu + avance) * 100) / 100);
+      l.recu = Math.min(l.qty - retourQty(l), Math.round((l.recu + avance) * 100) / 100);
       c.statut = statutCommande(c);
       save();
       if (c.statut === "recue") proposerArchivage(c);
@@ -1964,7 +2083,7 @@
   function receptionScan(pid, refId, parsed) {
     const c = receptionCtx ? commandeSuivi(receptionCtx.commandeId) : null;
     if (!c) { receptionCtx = null; openEntreeModal(pid, { scanned: parsed, refId }); return; }
-    const cand = c.lignes.filter(l => l.produitId === pid && l.recu < l.qty);
+    const cand = c.lignes.filter(l => l.produitId === pid && attenduLigne(l) > 0);
     const l = cand.find(x => x.refId === refId) || cand[0];
     if (l) { recevoirLigne(c, l.id, parsed); return; }
     const p = produit(pid);
@@ -2000,7 +2119,7 @@
   // « ✔ Reçu » (ou scan) sur une ligne qui n'est pas encore un produit du stock :
   // rattacher à un produit existant, ou créer sa fiche — puis entrée en stock.
   function openLierLigneModal(c, l, parsed) {
-    const reste = Math.max(0, l.qty - l.recu);
+    const reste = attenduLigne(l);
     openModal("Cet article n'est pas encore dans le stock", `
       <div class="scan-result-prod">
         <div class="p-name">${esc(nomLigne(l))}</div>
@@ -2079,7 +2198,7 @@
   // un produit du stock, le produit est créé (catégorie à choisir) avec sa
   // référence fournisseur, son prix et le code scanné.
   function openReceptionAssociateModal(parsed, c) {
-    const lignes = c.lignes.filter(l => l.recu < l.qty);
+    const lignes = c.lignes.filter(l => attenduLigne(l) > 0);
     const fournId = c.fournisseurId || "";
     openModal("Code inconnu — quel article de la commande ?", `
       <div class="scan-result-prod">
@@ -2091,7 +2210,7 @@
         ${lignes.length ? lignes.map(l => {
           const p = l.produitId ? produit(l.produitId) : null;
           return `<button type="button" class="as-item" data-pick="${l.id}">${esc(nomLigne(l))}
-            <div class="as-cat">${Math.max(0, l.qty - l.recu)} attendu${l.qty - l.recu > 1 ? "s" : ""}${l.ref ? " · réf " + esc(l.ref) : ""}${l.prix ? " · " + fmtEur(l.prix) : ""}
+            <div class="as-cat">${attenduLigne(l)} attendu${attenduLigne(l) > 1 ? "s" : ""}${l.ref ? " · réf " + esc(l.ref) : ""}${l.prix ? " · " + fmtEur(l.prix) : ""}
             ${p ? " · produit du stock : " + esc(p.name) : ' · <span class="cmd-unlinked">nouveau produit à créer</span>'}</div></button>`;
         }).join("") : '<div class="as-cat" style="padding:12px">Toutes les lignes de cette commande sont déjà reçues.</div>'}
       </div>`,
@@ -2349,7 +2468,7 @@
 
     /* ---- Date : « passée le … », « du … », « Le 25 sept. 2026 », sinon date du mail ---- */
     const anneeMail = meta.date && !isNaN(new Date(meta.date)) ? new Date(meta.date).getFullYear() : new Date().getFullYear();
-    const dm = /(?:date\s*(?:de\s*(?:la\s*)?commande|d'achat)?|temps\s*de\s*commande|pay[ée]e?\s*(?:le|sur)|command[ée]e?\s*le|pass[ée]e\s*le|\bdu|^\s*le)[\s|:\-]*(?:(?:lundi|mardi|mercredi|jeudi|vendredi|samedi|dimanche|lun|mar|mer|jeu|ven|sam|dim)\.?\s+)?(\d{1,2}(?:[\/.\-]\d{1,2}[\/.\-]\d{4}|(?:er)?\s+[a-zéû]+\.?(?:\s+\d{4})?))/im.exec(t);
+    const dm = /(?:date\s*(?:de\s*(?:la\s*)?commande|d'achat)?|temps\s*de\s*commande|pay[ée]e?\s*(?:le|sur)|command[ée]e?\s*le|pass[ée]e\s*le|placed\s*on|ordered\s*on|order\s*date|\bdu|^\s*le)[\s|:\-]*(?:(?:lundi|mardi|mercredi|jeudi|vendredi|samedi|dimanche|lun|mar|mer|jeu|ven|sam|dim)\.?\s+)?(\d{1,2}(?:[\/.\-]\d{1,2}[\/.\-]\d{4}|(?:er)?\s+[a-zéû]+\.?(?:\s+\d{4})?))/im.exec(t);
     draft.date = (dm && parseDateFr(dm[1], anneeMail)) || (meta.date ? localIso(new Date(meta.date)) : null) || todayIso();
 
     /* ---- Montants ---- */
@@ -2373,7 +2492,8 @@
     else if (meta.from) {
       const nm = /^"?([^"<@]+?)"?\s*</.exec(meta.from);
       const dom = /@(?:[a-z0-9-]+\.)*?([a-z0-9-]+)\.[a-z]{2,}/i.exec(meta.from);
-      draft.fournisseurNom = nm ? nm[1].trim() : (dom ? dom[1].charAt(0).toUpperCase() + dom[1].slice(1) : meta.from.trim());
+      draft.fournisseurNom = (nm ? nm[1].trim() : (dom ? dom[1].charAt(0).toUpperCase() + dom[1].slice(1) : meta.from.trim()))
+        .replace(/\s*[-–|]?\s*(?:team|[ée]quipe|service\s*clients?|commandes?|orders?)\s*$/i, "").trim() || meta.from.trim();
     }
 
     /* ---- Articles : lecture bloc par bloc ----
@@ -2391,8 +2511,8 @@
     const refOnly = /^\|?\s*\[?\s*(?:r[ée]f(?:[ée]rence)?\.?|sku|code\s*article)\s*:?\s*[A-Z0-9][A-Z0-9\-\/._]{2,}\s*\]?\s*\|?\s*$/i;
     const pctCell = /^\d{1,2}(?:[,.]\d+)?\s*%$/;
     const habillage = /^(?:vendu\s+par\b|exp[ée]di[ée]\s+par\b|[ée]tat\s*:|consulter\b|modifier\b|suivre\b|voir\s+(?:les|la|le)\b|g[ée]rer\b|afficher\b|acheter\b|retour\b|merci\b|pour\s+le\s+compte\b|n[°oº]\s*de\s*commande\b)/i;
-    const stop = /(?<![a-z0-9])(sous[\s\-]?total|total|tva|t\.v\.a|taxes?|frais|port|exp[ée]dition|livraison|emballage|participation|remise|rabais|r[ée]duction|[ée]conomis[ée]|coupon|code\s*promo|promo|importation|douane|montant|paiement|pay[ée]e?\s*(?:le|sur|par)|mastercard|visa|carte\s*bancaire|adresse|t[ée]l(?:[ée]phone)?|iban|siret|rpps|num[ée]ro\s*de\s*client|r[ée]sum[ée]|r[ée]capitulatif|d[ée]tail\s*de\s*(?:la\s*)?commande)(?![a-z0-9])/i;
-    const header = /\b(produits?|articles?|d[ée]signation|description|r[ée]f[ée]rence|qt[ée]|quantit[ée]|prix|total)\b/ig;
+    const stop = /(?<![a-z0-9])(sous[\s\-]?total|total|tva|t\.v\.a|taxes?|frais|port|exp[ée]dition|livraison|emballage|participation|remise|rabais|r[ée]duction|[ée]conomis[ée]|coupon|code\s*promo|promo|importation|douane|montant|paiement|pay[ée]e?\s*(?:le|sur|par)|mastercard|visa|carte\s*bancaire|adresse|sub[\s\-]?total|grand\s*total|vat|shipping|handling|delivery|payment|discount|voucher|billing|amount|phone|t[ée]l(?:[ée]phone)?|iban|siret|rpps|num[ée]ro\s*de\s*client|r[ée]sum[ée]|r[ée]capitulatif|d[ée]tail\s*de\s*(?:la\s*)?commande)(?![a-z0-9])/i;
+    const header = /\b(produits?|articles?|items?|d[ée]signation|description|r[ée]f[ée]rence|qt[ée]|qty|quantit[ée]|quantity|prix|price|amount|total)\b/ig;
     const lines = t.split("\n").map(s => s.trim());
     let pending = [];
     let dernierSansPrix = null, dernierSansPrixAt = -9; // article « × N » dont le prix arrive dans les 2 lignes suivantes
@@ -2738,7 +2858,7 @@
   function financeStats() {
     const parMois = {}, parAn = {};
     state.commandesSuivi.forEach(c => {
-      const m = montantCommande(c); if (!m) return;
+      const m = montantCommande(c) - montantRembourse(c); if (!m) return;
       const mois = c.date.slice(0, 7), an = c.date.slice(0, 4);
       parMois[mois] = (parMois[mois] || 0) + m;
       parAn[an] = (parAn[an] || 0) + m;
@@ -3039,6 +3159,7 @@
         <li><strong>🚚 Commandes</strong> : intégrez vos commandes (à la main, en collant le mail du fournisseur, ou via la
           passerelle Gmail). À la livraison, « 📷 Scanner la réception » : chaque scan valide une ligne et entre les boîtes en stock.
           Commande complète → on vous propose de l'archiver ; incomplète → elle passe en orange avec ses reliquats en haut.
+          « ↩ Retour » sur une ligne met de côté les boîtes à renvoyer (elles n'entrent pas en stock) ; l'onglet « Retours » suit le renvoi et le remboursement.
           L'onglet « Dépenses & valeur » montre les dépenses par mois/année, la fourchette de prix par produit et la valeur du stock.</li>
         <li><strong>⚙️ Réglages</strong> : fournisseurs (liens, notes franco de port), catégories, sauvegardes.</li>
       </ul>
