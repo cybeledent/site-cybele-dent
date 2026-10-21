@@ -608,3 +608,20 @@ svg.ico { flex-shrink: 0; vertical-align: middle; }
 .cond-row { display: flex; gap: 6px; }
 .cond-row input:first-child { width: 72px; flex: 0 0 72px; text-align: center; font-weight: 700; }
 .cond-result { margin-top: 10px; font-size: .95rem; color: var(--accent-dark); }
+
+/* ---- Retours fournisseur ---- */
+.btn-retour { color: #7c5cbf; }
+.btn-retour:hover { border-color: #7c5cbf; background: #f1ecfa; color: #7c5cbf; }
+.cmd-retour-info { margin-top: 4px; font-size: .8rem; color: #6a4aad; background: #f1ecfa; padding: 4px 8px; border-radius: 8px; display: inline-block; cursor: pointer; }
+.cmd-line.has-retour .cmd-line-qty { color: #7c5cbf; }
+.cmd-reliquat.retour { color: #6a4aad; background: #f1ecfa; }
+.cmd-card.retour-card { border-left-color: #7c5cbf; background: #fbf9fe; cursor: default; }
+.cmd-card.retour-card:hover { border-color: var(--line); }
+.cmd-card.retour-renvoye { border-left-color: #4a90d9; }
+.cmd-card.retour-rembourse { border-left-color: var(--ok); background: #fff; opacity: .8; }
+/* Lignes de commande sur téléphone : les boutons passent sous le texte */
+@media (max-width: 600px) {
+  .cmd-line { flex-wrap: wrap; }
+  .cmd-line .grow { flex-basis: calc(100% - 60px); }
+  .cmd-line .qty-btns { flex-basis: 100%; justify-content: flex-end; }
+}
