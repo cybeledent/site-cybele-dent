@@ -443,10 +443,13 @@ section { padding: 84px 0; }
 .aside-list a:hover { background: var(--teal-light); color: var(--teal-dark); }
 .aside-list a.current { background: var(--teal); color: #fff; }
 @media (max-width: 940px) {
-  .soin-layout { grid-template-columns: 1fr; gap: 36px; }
+  /* minmax(0, 1fr) : sans le « 0 », un contenu large (tableau des tarifs) élargit la colonne
+     au-delà de l'écran et tout le texte de la page est coupé à droite sur mobile. */
+  .soin-layout { grid-template-columns: minmax(0, 1fr); gap: 36px; }
   .soin-aside { position: static; }
   .aside-photo { max-width: 460px; }
 }
+.soin-main, .soin-aside { min-width: 0; }
 
 /* =========================================================
    ENCART D'OUVERTURE (provisoire)
@@ -509,9 +512,33 @@ section { padding: 84px 0; }
 table.tarifs { width: 100%; border-collapse: collapse; background: #fff; border: 1px solid #eef3f3; border-radius: var(--radius-sm); overflow: hidden; font-size: .95rem; }
 table.tarifs th, table.tarifs td { padding: 10px 14px; text-align: left; border-bottom: 1px solid #f0f4f4; }
 table.tarifs th { background: var(--teal-light); color: var(--teal-dark); font-family: var(--font-head); font-weight: 600; font-size: .88rem; }
-table.tarifs td:nth-child(2), table.tarifs td:nth-child(3), table.tarifs th:nth-child(2), table.tarifs th:nth-child(3) { white-space: nowrap; }
+table.tarifs td:nth-child(2), table.tarifs td:nth-child(3) { white-space: nowrap; }
+table.tarifs th:nth-child(2), table.tarifs th:nth-child(3) { white-space: normal; }
+table.tarifs th:first-child { width: 46%; }
 table.tarifs tr:last-child td { border-bottom: none; }
+table.tarifs .th-short { display: none; }
 .table-note { font-size: .9rem; color: var(--muted); }
+/* Tableau des tarifs sur petit écran : en-têtes sur plusieurs lignes, cellules plus compactes,
+   et défilement horizontal de secours si l'écran est vraiment étroit. */
+@media (max-width: 760px) {
+  .table-wrap { -webkit-overflow-scrolling: touch; border-radius: var(--radius-sm); }
+  table.tarifs { font-size: .9rem; }
+  table.tarifs th, table.tarifs td { padding: 9px 10px; }
+  table.tarifs th { font-size: .8rem; }
+  table.tarifs th:first-child { width: auto; }
+  table.tarifs td:nth-child(2), table.tarifs td:nth-child(3) { text-align: right; width: 1%; }
+  table.tarifs th:nth-child(2), table.tarifs th:nth-child(3) { text-align: right; }
+  /* En-tête abrégé sur mobile (la version complète reste lue par les lecteurs d'écran) */
+  table.tarifs .th-long { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
+  table.tarifs .th-short { display: inline; }
+}
+@media (max-width: 480px) {
+  table.tarifs { font-size: .85rem; }
+  table.tarifs th, table.tarifs td { padding: 8px 6px; }
+  table.tarifs th:first-child, table.tarifs td:first-child { padding-left: 10px; }
+  table.tarifs th:last-child, table.tarifs td:last-child { padding-right: 10px; }
+  table.tarifs th { font-size: .74rem; }
+}
 .footer-legal { display: block; margin-top: 8px; font-size: .82rem; }
 .legal-main h2 { font-size: 1.25rem; margin: 34px 0 10px; }
 .legal-main p, .legal-main li { color: var(--muted); }
@@ -636,7 +663,9 @@ table.tarifs tr:last-child td { border-bottom: none; }
   /* Bandeau de page intérieure plus compact */
   .page-banner { padding: 64px 0 54px; }
 
-  /* Boutons d'action empilés et pleine largeur pour un meilleur confort tactile */
+  /* Boutons d'action empilés et pleine largeur pour un meilleur confort tactile ;
+     un libellé long peut passer à la ligne au lieu de déborder de l'écran. */
+  .btn { white-space: normal; text-align: center; max-width: 100%; }
   .hero-actions { flex-direction: column; align-items: stretch; }
   .hero-actions .btn { width: 100%; justify-content: center; }
 }
