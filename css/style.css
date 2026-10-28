@@ -507,7 +507,6 @@ section { padding: 84px 0; }
 @media (max-width: 760px) { .rdv-grid { grid-template-columns: 1fr; } }
 
 /* Auteur / date, grille des tarifs, pages légales */
-.byline-soin { font-size: .88rem; color: var(--teal-dark); background: var(--teal-light); display: inline-block; padding: 6px 14px; border-radius: 999px; margin: -14px 0 26px; }
 .table-wrap { overflow-x: auto; margin: 6px 0 10px; }
 table.tarifs { width: 100%; border-collapse: collapse; background: #fff; border: 1px solid #eef3f3; border-radius: var(--radius-sm); overflow: hidden; font-size: .95rem; }
 table.tarifs th, table.tarifs td { padding: 10px 14px; text-align: left; border-bottom: 1px solid #f0f4f4; }
