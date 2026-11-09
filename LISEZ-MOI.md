@@ -49,7 +49,7 @@ Restent **provisoires** à remplacer (« Rechercher / Remplacer » dans tous les
 2. **Nom de domaine** — pour le référencement, remplacer `https://www.cybele-dent.fr`
    par votre vrai domaine dans : `sitemap.xml`, `robots.txt`, et les balises
    `canonical` / `og:` / données structurées de chaque page `.html`.
-3. **Autres membres de l'équipe** — ✅ `equipe.html` présente Amélie, Marion, Solenn (assistantes) et Delphine (secrétaire) ; il reste à déposer la photo de Solenn (voir ci-dessous).
+3. ✅ **Autres membres de l'équipe** — `equipe.html` présente Amélie, Marion, Solenn (assistantes) et Delphine (secrétaire), avec leurs photos.
 4. **Photos des salles** — voir ci-dessous.
 
 ## 🔎 Référencement (SEO) — déjà en place
@@ -96,11 +96,10 @@ Restent **provisoires** à remplacer (« Rechercher / Remplacer » dans tous les
 
 - ✅ **Photo de la cathédrale** (`assets/cathedrale-vienne.jpg`), ✅ **logo**
   (`assets/logo-cabinet.jpg`) et ✅ **portraits** des praticiennes : déjà intégrés.
-- **Photos équipe (assistantes & secrétariat) :** ✅ Amélie (`equipe-assistante-1.jpg`),
-  Marion (`equipe-assistante-2.jpg`) et Delphine (`equipe-secretaire.jpg`) sont en place.
-  Pour **Solenn**, déposez **1 photo carrée** (1000 × 1000 px, JPEG, moins de 150 Ko) dans
-  `assets/` sous le nom exact `equipe-assistante-3.jpg` : elle s'affichera automatiquement
-  à la place du pictogramme.
+- ✅ **Photos équipe (assistantes & secrétariat) :** Amélie (`equipe-assistante-1.jpg`),
+  Marion (`equipe-assistante-2.jpg`), Solenn (`equipe-assistante-3.jpg`) et Delphine
+  (`equipe-secretaire.jpg`) sont en place. Pour remplacer un portrait : photo carrée
+  (1000 × 1000 px, JPEG, moins de 150 Ko) déposée dans `assets/` sous le même nom.
 - **Photos des salles :** même principe dans `salles.html`.
 - ✅ **Photos des soins (page « Nos soins ») :** toutes en place (prévention,
   soins dentaires, parodontologie, endodontie, prothèses, implants, pédodontie,
