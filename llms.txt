@@ -20,7 +20,7 @@ Texte intégral de toutes les pages en un seul fichier : https://www.cybele-dent
 ## Pages principales
 - [Accueil](https://www.cybele-dent.fr/) : présentation du cabinet, prise de rendez-vous adultes et enfants, questions fréquentes
 - [Nos soins](https://www.cybele-dent.fr/actes.html) : liste des soins réalisés au cabinet
-- [L'équipe](https://www.cybele-dent.fr/equipe.html) : praticiennes et assistantes dentaires
+- [L'équipe](https://www.cybele-dent.fr/equipe.html) : praticiennes, assistantes dentaires (Amélie, Marion, Solenn) et secrétariat (Delphine)
 - [Le cabinet en images](https://www.cybele-dent.fr/salles.html) : salles de soins, stérilisation, radio panoramique et Cone Beam 3D
 - [Contact, horaires et accès](https://www.cybele-dent.fr/contact.html)
 - [Tarifs et remboursements](https://www.cybele-dent.fr/tarifs-remboursement-dentiste-vienne.html)
