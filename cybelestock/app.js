@@ -402,6 +402,9 @@
     if (s[0] === "]") s = s.slice(3);
     // Code-barres simple (EAN-8/12/13/14) : juste un GTIN
     if (/^\d{8}$|^\d{12,14}$/.test(s)) return { gtin: s, peremption: null, lot: null, raw: raw };
+    // HIBC (dispositifs médicaux : « +E22110741/$$3281215… ») : autre norme que GS1
+    const hibc = parseHibc(s);
+    if (hibc) return Object.assign(hibc, { raw: raw });
 
     const out = { gtin: null, peremption: null, lot: null, raw: raw };
     let i = 0, foundAny = false;
@@ -439,6 +442,59 @@
     return out;
   }
 
+  /* HIBC (Health Industry Bar Code), fréquent sur les dispositifs médicaux.
+     Primaire : « + » LIC (4) + code produit + unité, ex. +E22110741.
+     Secondaire après « / » : $$ + [format] + date + lot, ou $ + lot seul,
+     /S numéro de série, /14D AAAAMMJJ (péremption). Le dernier caractère
+     de la chaîne est un caractère de contrôle : on l'enlève.
+     Résultat : gtin = identifiant primaire (texte), peremption, lot. */
+  function parseHibc(raw) {
+    let s = String(raw || "").trim().replace(/^\*+|\*+$/g, "");
+    if (!/^\+[A-Z0-9$]/i.test(s)) return null;
+    const out = { gtin: null, peremption: null, lot: null, hibc: true };
+    const parts = s.slice(1).split("/");
+    let primary = parts.shift();
+    if (!parts.length) { primary = primary.slice(0, -1); }          // primaire seul : son contrôle est à la fin
+    else parts[parts.length - 1] = parts[parts.length - 1].slice(0, -1); // sinon le contrôle termine la chaîne
+    if (primary && !/^\$/.test(primary)) out.gtin = "+" + primary;
+    else if (primary) parts.unshift(primary);                          // secondaire scanné seul (+$$…)
+    const dateFrom = (fmt, v) => {
+      const d2 = (y, m, dd) => { const Y = 2000 + y; if (m < 1 || m > 12) return null; const D = dd || new Date(Y, m, 0).getDate(); return Y + "-" + String(m).padStart(2, "0") + "-" + String(D).padStart(2, "0"); };
+      const jul = (y, j) => { const d = new Date(2000 + y, 0, j); return d.getFullYear() + "-" + String(d.getMonth() + 1).padStart(2, "0") + "-" + String(d.getDate()).padStart(2, "0"); };
+      switch (fmt) {
+        case "0": return [4, d2(+v.slice(2, 4), +v.slice(0, 2), 0)];            // MMAA
+        case "1": return [4, d2(+v.slice(2, 4), +v.slice(0, 2), 0)];
+        case "2": return [6, d2(+v.slice(4, 6), +v.slice(0, 2), +v.slice(2, 4))]; // MMJJAA
+        case "3": return [6, d2(+v.slice(0, 2), +v.slice(2, 4), +v.slice(4, 6))]; // AAMMJJ
+        case "4": return [8, d2(+v.slice(0, 2), +v.slice(2, 4), +v.slice(4, 6))]; // AAMMJJHH
+        case "5": return [5, jul(+v.slice(0, 2), +v.slice(2, 5))];                // AAJJJ
+        case "6": return [7, jul(+v.slice(0, 2), +v.slice(2, 5))];                // AAJJJHH
+        case "7": return [0, null];                                               // pas de date
+        default: return null;
+      }
+    };
+    parts.forEach(seg => {
+      if (/^\$\$/.test(seg)) {
+        const body = seg.slice(2);
+        // « $$3AAMMJJ… » : chiffre de format puis date ; sinon « $$MMAA… » ; si la date
+        // n'est pas valide dans les deux lectures, tout est un numéro de lot.
+        let lu = null;
+        if (/^[2-7]/.test(body)) { const r = dateFrom(body[0], body.slice(1)); if (r && (r[1] || body[0] === "7")) lu = { date: r[1], lot: body.slice(1 + r[0]) }; }
+        if (!lu) { const r = dateFrom("0", body); if (r && r[1]) lu = { date: r[1], lot: body.slice(r[0]) }; }
+        if (!lu) lu = { date: null, lot: body };
+        if (lu.date) out.peremption = lu.date;
+        if (lu.lot && !out.lot) out.lot = lu.lot;
+      } else if (/^\$\+/.test(seg)) { /* numéro de série : ignoré */ }
+      else if (/^\$/.test(seg)) { if (!out.lot) out.lot = seg.slice(1); }
+      else if (/^14D\d{8}$/.test(seg)) out.peremption = seg.slice(3, 7) + "-" + seg.slice(7, 9) + "-" + seg.slice(9, 11);
+      else if (/^16D\d{8}$/.test(seg)) { /* date de fabrication : ignorée */ }
+      else if (/^(S|Q)/.test(seg)) { /* série / quantité : ignorés */ }
+    });
+    if (out.lot) out.lot = out.lot.replace(/[^A-Z0-9\-._]/gi, "");
+    if (!out.gtin && !out.lot && !out.peremption) return null;
+    return out;
+  }
+
   // AAMMJJ → ISO ; jour "00" = fin de mois
   function gs1Date(v) {
     if (!/^\d{6}$/.test(v)) return null;
@@ -450,10 +506,14 @@
     return year + "-" + String(mm).padStart(2, "0") + "-" + String(dd).padStart(2, "0");
   }
 
-  function normGtin(g) { return String(g || "").replace(/\D/g, "").replace(/^0+/, ""); }
+  function normGtin(g) {
+    const s = String(g || "").trim();
+    if (s[0] === "+") return s.toUpperCase().replace(/[^A-Z0-9+]/g, ""); // identifiant HIBC : lettres conservées
+    return s.replace(/\D/g, "").replace(/^0+/, "");
+  }
 
   // Exposé pour les tests (console)
-  window.CybeleStockDev = { parseGs1, gs1Date, normGtin };
+  window.CybeleStockDev = { parseGs1, parseHibc, gs1Date, normGtin };
 
   // Retrouve (produit, référence) à partir d'un GTIN scanné
   function findByGtin(gtin) {
